@@ -111,8 +111,7 @@ def calcMA(sat, t):
 
     M0 = sat['MNANOM']
     n = sat['MNMOTION']
-    #M0 = radians(326.2322)
-    #n = 12.62256095
+
     Mt = M0 + 360*(n*t - int(n*t) - int((M0 + 360*(n*t - int(n*t)))/(360)))
     Mt = radians(Mt)
     return Mt
@@ -124,10 +123,8 @@ def calcTA(sat,M):
     # First we calculate eccentric anomaly, third order
     # This returns v in radians
     e = sat['ECCENTRICITY']
-    #e = 0.0001492
     E = M + e*sin(M) + e**2 *sin(M)*cos(M) + 1.0/2 * e**3 * sin(M) * (3*cos(M)**2 - 1)
-    
-    #v = acos((cos(E)-e)/(1-e*cos(E)))
+
     x = sqrt(1-e)*cos(E/2)
     y = sqrt(1+e)*sin(E/2)
     v = 2*atan2(y,x)
@@ -137,8 +134,8 @@ def calcTA(sat,M):
 def calcSMA(sat):
     # Confirmed working
     # Returns distance from earth center in km
+    
     n = sat['MNMOTION']
-    #n = 12.62256095
     # mu is in km^3/day^2
     mu = 2.97554e15
     a = (mu/(2*pi*n)**2)**(1.0/3)
@@ -149,7 +146,7 @@ def calcPerigee(sat,a):
     # Confirmed working
     # Returns distance from earth center in km
     e = sat['ECCENTRICITY']
-    #e = 0.0001492
+
     perigee = a*(1-e)
     return perigee
 
@@ -157,7 +154,7 @@ def calcPerigee(sat,a):
 def geoDist(sat, P, v):
     # Confirmed working
     e = sat['ECCENTRICITY']
-    #e = 0.0001492
+
     r = (P*(1+e))/(1+e*cos(v))
     return r
 
@@ -172,16 +169,6 @@ def precession(sat,a,t):
     i = radians(sat['INCLINATION'])
     RAAN = sat['RAAN']
     AP = sat['ARGPERIGEE']
-
-
-    # Testing constants
-    #n = 12.62256095
-    #i = radians(51.9970)
-    #RAAN = 251.0219
-    #AP = 33.8641
-    #e = 0.0001492
-    #t = 1.7677141
-    #a = 7791.787473
 
     # Radius of earth in km
     Re = 6378.135
@@ -222,7 +209,7 @@ def calcRADiff(sat, ArgLat):
     # Confirmed working
     # ArgLat should be in radians, Returns in radians
     i = radians(sat['INCLINATION'])
-    #i = radians(51.9970)
+
     if((0<i<pi/2 and 0<ArgLat<pi) or (pi/2<i<pi and pi<ArgLat<2*pi)):
         RADiff = acos(cos(ArgLat)/sqrt(1-sin(i)**2 * sin(ArgLat)**2))
     else:
@@ -240,8 +227,6 @@ def calcGeocentricRA(RADiff, pRAAN):
 
 
 def calcGeocentricDec(ArgLat, RADiff):
-    #print(ArgLat)
-    #print(RADiff)
     # Inputs in radians, output in radians
     gcDec = (copysign(1, sin(ArgLat))) * acos(cos(ArgLat)/cos(RADiff))
     return gcDec
@@ -272,9 +257,6 @@ def LLA2cart(recvLat=0, recvLong=0, recvAlt=100):
         obsgcRA -= 360
     obsgcRA = radians(obsgcRA)    
 
-
-    #obsgcDec = radians(44.5903)
-    #obsgcRA = radians(15.419875)
     # Calculate earth center to receiver location
     Re = 6378.135
     Rp = 6356.752
@@ -310,7 +292,8 @@ def cart2RADec(satpos, obspos):
 
     r = sqrt(xs**2 + ys**2 + zs**2)
     delta = asin(zs/r)
-
+    #earthrot = radians(utcDatetime2gmst(datetime.utcnow()))
+    #alpha = alpha + earthrot
     return [alpha,delta,r]
 
     
@@ -330,7 +313,7 @@ def RADec2AzAlt(alpha, delta, r, lat):
         
     return [Az, Alt]
 
-def ECEF2LLA(pos):
+def ECEF2LLA(pos,manual_t = 0):
     # Confirmed working
     X = pos[0]
     Y = pos[1]
@@ -348,10 +331,18 @@ def ECEF2LLA(pos):
     b = 6356752.31424518
     e = ((a**2 - b**2)/(a**2))**(1.0/2)
     i = 0
+    
     while(error > 0.0000001):
         if(i>50):
             print("enabled newton raphson modified guess")
             lati = atan(Z/sqrt(X**2 + Y**2))
+            earthrot = radians(utcDatetime2gmst(datetime.utcnow()) + manual_t / 86400.0 * 360.0)
+            #earthrot = 0
+            long = long - earthrot
+            while(long > pi):
+                long -= 2*pi
+            while(long < -pi):
+                long += 2*pi
             return [degrees(lati), degrees(long)]
             
         Rn = a/((1-(e**2)*(sin(lati)**2)))
@@ -360,13 +351,19 @@ def ECEF2LLA(pos):
         error = abs(lati - latnext)
         lati = latnext
         i += 1
-    
-    
-    # TEST Lati
-    #lati = atan(Z/sqrt(X**2 + Y**2))
+
+    earthrot = radians(utcDatetime2gmst(datetime.utcnow()) + manual_t / 86400.0 * 360.0)
+
+    long = long - earthrot
+    while(long > pi):
+        long -= 2*pi
+    while(long < -pi):
+        long += 2*pi
+
     return [degrees(lati), degrees(long)]
 
 
+# Plotting data
 
 plot3d = 0
 plotRA = 0
@@ -388,7 +385,7 @@ RAfile = []
 latfile = []
 longfile= []
 if(1==plotting):
-    for time in range(1,6000):
+    for time in range(1,12000):
         t += 1/86400.0
         M = calcMA(sat, t)
         a = calcSMA(sat)
@@ -410,7 +407,7 @@ if(1==plotting):
         AzAlt = RADec2AzAlt(alpha, delta, rg, lat)
         Az = AzAlt[0]
         Alt = AzAlt[1]
-        LLAcoords = ECEF2LLA(cartcoords)
+        LLAcoords = ECEF2LLA(cartcoords,t)
         print time
         
         
@@ -484,6 +481,7 @@ print('epochDiff',t)
 print('calcMA',degrees(calcMA(sat,t)))
 print('calcTA',degrees(calcTA(sat,M)))
 print('calcSMA',calcSMA(sat))
+print('rg',r)
 #print('calcPerigee',calcPerigee(sat,a))
 print('pRAAN',pRAAN)
 print('pAP',pAP)
@@ -493,6 +491,7 @@ print('ArgLat', ArgLat)
 print('calcRADiff', calcRADiff(sat, ArgLat))
 print('calcGeocentricRA',gcRA)
 print('calcGeocentricDec',gcDec)
+print('RA and Dec',alpha, delta)
 print('pol2cart',cartcoords)
 print('ECEF2LLA',LLAcoords)
 #print('LLA2cart',obsvcoords)
