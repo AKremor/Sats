@@ -57,6 +57,8 @@ def loadTLE():
     # Confirmed working
     URL = 'http://www.amsat.org/amsat/ftp/keps/current/nasabare.txt'
     URL = 'http://www.celestrak.com/NORAD/elements/stations.txt'
+    URL ='http://www.celestrak.com/NORAD/elements/sbas.txt'
+    URL = 'http://www.celestrak.com/NORAD/elements/tle-new.txt'
     response = requests.get(URL)
     data = response.content
     TLE = {}
@@ -218,11 +220,13 @@ def calcRADiff(sat, ArgLat):
     return RADiff
 
 
-def calcGeocentricRA(RADiff, pRAAN):
+def calcGeocentricRA(RADiff, pRAAN, manual_t=0):
     # Confirmed working
     # Inputs should be in radians, returns in radians
-    gcRA = RADiff + pRAAN - 2*pi*(int((RADiff + pRAAN)/(2*pi)))
-
+    GMST = utcDatetime2gmst(datetime.utcnow())*86400.0/86164.0
+    earthrot = radians(GMST + manual_t*360.0)
+    gcRA = -earthrot + RADiff + pRAAN - 2*pi*(int((RADiff + pRAAN)/(2*pi)))
+    #added in earth rotation test
     return gcRA
 
 
@@ -336,8 +340,8 @@ def ECEF2LLA(pos,manual_t = 0):
         if(i>50):
             print("enabled newton raphson modified guess")
             lati = atan(Z/sqrt(X**2 + Y**2))
-            earthrot = radians(utcDatetime2gmst(datetime.utcnow()) + manual_t / 86400.0 * 360.0)
-            #earthrot = 0
+            #earthrot = radians(utcDatetime2gmst(datetime.utcnow()) + manual_t / 86400.0 * 360.0)
+            earthrot = 0
             long = long - earthrot
             while(long > pi):
                 long -= 2*pi
@@ -352,8 +356,8 @@ def ECEF2LLA(pos,manual_t = 0):
         lati = latnext
         i += 1
 
-    earthrot = radians(utcDatetime2gmst(datetime.utcnow()) + manual_t / 86400.0 * 360.0)
-
+    #earthrot = radians(utcDatetime2gmst(datetime.utcnow()) + manual_t / 86400.0 * 360.0)
+    earthrot = 0
     long = long - earthrot
     while(long > pi):
         long -= 2*pi
@@ -365,14 +369,14 @@ def ECEF2LLA(pos,manual_t = 0):
 
 # Plotting data
 
-plot3d = 0
+plot3d = 1
 plotRA = 0
 plotLLA = 0
 plotting = max(plot3d, plotRA, plotLLA)
 
 lat = -36.377518
 TLE = loadTLE()
-sat = TLE['ISS (ZARYA)']
+sat = TLE['SL-4 R/B']
 t = epochDiff(sat)
 #t = 1.7677141
 MAfile = []
@@ -385,7 +389,7 @@ RAfile = []
 latfile = []
 longfile= []
 if(1==plotting):
-    for time in range(1,12000):
+    for time in range(1,100000):
         t += 1/86400.0
         M = calcMA(sat, t)
         a = calcSMA(sat)
@@ -396,7 +400,7 @@ if(1==plotting):
         ArgLat = calcArgLat(v, pAP)
         RADiff = calcRADiff(sat, ArgLat)
         r = geoDist(sat, P, v)
-        gcRA = calcGeocentricRA(RADiff, pRAAN)
+        gcRA = calcGeocentricRA(RADiff, pRAAN, t)
         gcDec = calcGeocentricDec(ArgLat, RADiff)
         cartcoords = pol2cart(r, gcRA, gcDec)
         obsvcoords = LLA2cart(-36.377518, 145.400044, 100)
@@ -446,8 +450,8 @@ if(plotRA == 1):
     plt.show()
 
 if(plotLLA == 1):
-    plt.plot(timevalues, latfile, 'r', timevalues, longfile, 'b')
-    #plt.plot(latfile,longfile)
+    #plt.plot(longfile, latfile, 'r')
+    plt.plot(latfile,longfile)
     plt.ylabel('Lat (r)/ Long (b)')
     plt.xlabel('Time (s)')
     plt.show()
@@ -496,5 +500,5 @@ print('pol2cart',cartcoords)
 print('ECEF2LLA',LLAcoords)
 #print('LLA2cart',obsvcoords)
 #print('cart2RADec', degrees(alpha), degrees(delta),rg)
-#print('RADec2AzAlt', degrees(Az),degrees(Alt))
+print('RADec2AzAlt', degrees(Az),degrees(Alt))
 #print('siderealtime',utcDatetime2gmst(datetime.utcnow()))
