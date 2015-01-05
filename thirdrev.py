@@ -4,7 +4,9 @@ from math import (floor, pi, radians, degrees, sin, cos,
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import requests
-
+from time import sleep
+import numpy as np
+from selenium import webdriver
 
 def ymd2jd(year, month, day):
     if month == 1 or month == 2:
@@ -40,23 +42,19 @@ def utcDatetime2gmst(datetimeObj):
     T0 = 6.697374558 + (2400.051336 * T) + (0.000025862 * T**2)
     T0 = T0 % 24
 
-    UT = datetime2decHours(datetimeObj.time()) * 1.002737909
+    time = datetimeObj.time()
+    hour = time.hour
+    minute = time.minute/60.0
+    second = time.second / 3600.0
+    microsecond = time.microsecond/3600000000
+    
+    UT = (hour + minute + second + microsecond) * 1.002737909
     T0 += UT
 
     GST = T0 % 24
     GST = GST * 15
 
     return GST
-
-
-def datetime2decHours(time):
-    # Confirmed working
-    hour = time.hour
-    minute = time.minute/60.0
-    second = time.second / 3600.0
-    microsecond = time.microsecond/3600000000
-
-    return hour + minute + second + microsecond
 
 
 def loadTLE():
@@ -66,28 +64,64 @@ def loadTLE():
                'http://www.celestrak.com/NORAD/elements/sbas.txt',
                'http://www.celestrak.com/NORAD/elements/tle-new.txt']
     TLE = {}
-    for URL in URLlist:
-        response = requests.get(URL)
-        data = response.content
+    
+    try:
+        TLEfile = open('TLE.txt','r')
+        curr_time = datetime.utcnow()
+        lines = TLEfile.readlines()
+        TLE_time = datetime.strptime(lines[0].rstrip(),"%Y %m %d %H:%M")
+        if (curr_time - TLE_time) > timedelta(days = 3):
+            TLEfile.close()
+            # Open instead for writing
+            TLEfile = open('TLE.txt','w')
+            TLEfile.write(datetime.utcnow().strftime("%Y %m %d %H:%M") + '\n')
+            print('Current TLE older than 3 days, downloading new')
+            for URL in URLlist:
+                response = requests.get(URL)
+                data = response.content
+                TLEfile.write(data)
+                TLE.update(interpretTLE(data))
+                
+            return TLE
+        else:
+            print('Using cached TLE: ' + str(lines[0]))
+            TLE.update(interpretTLE(lines[1:]))
+            return TLE
+    except:
+        print('Downloading TLE')
+        TLEfile = open('TLE.txt','w')
+        TLEfile.write(datetime.utcnow().strftime("%Y %m %d %H:%M" + '\n'))
+        
+        for URL in URLlist:
+            response = requests.get(URL)
+            data = response.content
+            TLEfile.write(data)
+            TLE.update(interpretTLE(data))
+            
+        return TLE
+    
 
-        # Split the data into lines
+def interpretTLE(data):
+    # Split the data into lines
+    if type(data) is not list:
         data = data.split('\n')
+    TLE = {}
 
-        for i in range(0, len(data)-2, 3):
-            sat_name = data[i].rstrip()
-            line1 = data[i+1].split()
-            line2 = data[i+2].split()
+    for i in range(0, len(data)-2, 3):
+        sat_name = data[i].rstrip()
+        line1 = data[i+1].split()
+        line2 = data[i+2].split()
 
-            TLE[sat_name] = {'CATALOGNUM': line1[1],
-                             'EPOCHTIME': float(line1[3]),
-                             'DECAY': float(line1[4]),
-                             'INCLINATION': float(line2[2]),
-                             'RAAN': float(line2[3]),
-                             'ECCENTRICITY': float(line2[4])/10000000.0,
-                             'ARGPERIGEE': float(line2[5]),
-                             'MNANOM': float(line2[6]),
-                             'MNMOTION': float(line2[7][:10]),
-                             'ORBITNUM': line2[7][11:16]}
+        TLE[sat_name] = {'CATALOGNUM': line1[1],
+                         'EPOCHTIME': float(line1[3]),
+                         'DECAY': float(line1[4]),
+                         'INCLINATION': float(line2[2]),
+                         'RAAN': float(line2[3]),
+                         'ECCENTRICITY': float(line2[4])/10000000.0,
+                         'ARGPERIGEE': float(line2[5]),
+                         'MNANOM': float(line2[6]),
+                         'MNMOTION': float(line2[7][:10]),
+                         'ORBITNUM': line2[7][11:16]}
 
     return TLE
 
@@ -127,8 +161,24 @@ def calcMA(sat, t):
     n = sat['MNMOTION']
 
     Mt = M0 + 360*(n*t - int(n*t) - int((M0 + 360*(n*t - int(n*t)))/(360)))
-    Mt = radians(Mt)
-    return Mt
+    return radians(Mt)
+
+def calcEA(sat, M):
+    # I think this returns it in radians, seems consistent at least
+    E0 = sat['MNANOM']
+    e = sat['ECCENTRICITY']
+
+    # Initial guess
+    Ed = (M + e*sin(E0) - E0)/(1-e*cos(E0))
+
+    # Our delta E term
+    Ed = 100000000
+    while(Ed > 0.000000001):
+        E = E0 - (E0 - e*sin(E0) - M)/(1-e*cos(E0))
+        Ed = abs(E-E0)
+        E0 = E
+
+    return E
 
 
 def calcTA(sat, M):
@@ -137,10 +187,11 @@ def calcTA(sat, M):
     # First we calculate eccentric anomaly, third order
     # This returns v in radians
     e = sat['ECCENTRICITY']
-    Edash = e**2 * sin(M)*cos(M)
-    Edashdash = 1.0/2 * e**3 * sin(M) * (3*cos(M)**2 - 1)
-    E = M + e*sin(M) + Edash + Edashdash
+    #Edash = e**2 * sin(M)*cos(M)
+    #Edashdash = 1.0/2 * e**3 * sin(M) * (3*cos(M)**2 - 1)
+    #E = M + e*sin(M) + Edash + Edashdash
 
+    E = calcEA(sat, M)
     x = sqrt(1-e)*cos(E/2)
     y = sqrt(1+e)*sin(E/2)
     v = 2*atan2(y, x)
@@ -271,11 +322,10 @@ def LLA2cart(recvLat=0, recvLong=0, recvAlt=100):
     obsgcDec = radians(recvLat)
 
     # If not working, check whether the recvLong is needed
-    obsgcRA = utcDatetime2gmst(datetime.utcnow()) + recvLong
+    obsgcRA = radians(utcDatetime2gmst(datetime.utcnow()) + recvLong)
 
-    while(obsgcRA > 360):
-        obsgcRA -= 360
-    obsgcRA = radians(obsgcRA)
+    while(obsgcRA > 2*pi):
+        obsgcRA -= 2*pi
 
     # Calculate earth center to receiver location
     Re = 6378.135
@@ -333,8 +383,8 @@ def ECEF2LLA(pos):
     Y = pos[1]
     Z = pos[2]
 
-    r = (X**2 + Y**2 + Z**2)**(1.0/2)
-    p = (X**2 + Y**2)**(1.0/2)
+    r = sqrt(X**2 + Y**2 + Z**2)
+    p = sqrt(X**2 + Y**2)
 
     # First calculate geocentric lat
     lati = atan2(p, Z)
@@ -344,7 +394,7 @@ def ECEF2LLA(pos):
     # Earth radius at equator and poles
     a = 6378137.0
     b = 6356752.31424518
-    e = ((a**2 - b**2)/(a**2))**(1.0/2)
+    e = sqrt((a**2 - b**2)/(a**2))
     i = 0
 
     while(error > 0.0000001):
@@ -372,100 +422,126 @@ def ECEF2LLA(pos):
 
     return [degrees(lati), degrees(long)]
 
+def TLE2LLA(sat, manual_t = 0):
+    t = epochDiff(sat) + manual_t/86400.0
+    M = calcMA(sat, t)
+    a = calcSMA(sat)
+    v = calcTA(sat, M)
+    P = calcPerigee(sat, a)
+    pRAAN, pAP = precession(sat, a, t)
+    ArgLat = calcArgLat(v, pAP)
+    RADiff = calcRADiff(sat, ArgLat)
+    r = geoDist(sat, P, v)
+    gcRA = calcGeocentricRA(RADiff, pRAAN)
+    gcDec = calcGeocentricDec(ArgLat, RADiff)
+    cartcoords = pol2cart(r, gcRA, gcDec)
+    obsvcoords = LLA2cart(lat, long, height)
+    alpha, delta, rg = cart2RADec(cartcoords, obsvcoords)
+    Az, Alt = RADec2AzAlt(alpha, delta, rg, lat)
+    LLAcoords = ECEF2LLA(cartcoords)
+    return LLAcoords
 
-# Plotting data
-plot3d = 0
-plotRA = 0
-plotLLA = 0
-duration = 100000  # Seconds
+def dataOutput(plot3d, plotRA, plotLLA, filewrite, duration):
 
-plotting = max(plot3d, plotRA, plotLLA)
+    plotting = max(plot3d, plotRA, plotLLA, filewrite)
+    
+    if(1 == plotting):
+        myoutput = open('thirdrev.txt','w')
+        path_to_chromedriver = 'C:\Users\Anthony\OneDrive\Programming\Sats\Sats\chromedriver.exe' # change path as needed
+        browser = webdriver.Chrome(executable_path = path_to_chromedriver)
+        url = 'http://www.n2yo.com/?s=27607'
+        browser.get(url)
+        sleep(10)
+        tx = []
+        ty = []
+        tz = []
+        RAfile = []
+        latfile = []
+        longfile = []
+        i = 0
 
-lat = -36.377518  # Can this be removed?
+        t = epochDiff(sat)
+
+        for time in xrange(1, duration, 10):
+        #while(i<7000):
+            #t = epochDiff(sat)
+            t += 1/86400.0
+            M = calcMA(sat, t)
+            a = calcSMA(sat)
+            v = calcTA(sat, M)
+            P = calcPerigee(sat, a)
+            pRAAN = precession(sat, a, t)[0]
+            pAP = precession(sat, a, t)[1]
+            ArgLat = calcArgLat(v, pAP)
+            RADiff = calcRADiff(sat, ArgLat)
+            r = geoDist(sat, P, v)
+            gcRA = calcGeocentricRA(RADiff, pRAAN)
+            gcDec = calcGeocentricDec(ArgLat, RADiff)
+            cartcoords = pol2cart(r, gcRA, gcDec)
+            obsvcoords = LLA2cart(-36.377518, 145.400044, 100)
+            RADec = cart2RADec(cartcoords, obsvcoords)
+            alpha = RADec[0]
+            delta = RADec[1]
+            rg = RADec[2]
+            AzAlt = RADec2AzAlt(alpha, delta, rg, lat)
+            Az = AzAlt[0]
+            Alt = AzAlt[1]
+            LLAcoords = ECEF2LLA(cartcoords)
+            
+            # Lets webscrape
+
+            n2lat = browser.find_element_by_id("satlat")
+            n2long = browser.find_element_by_id("satlng")
+
+            tx.append(cartcoords[0])
+            ty.append(cartcoords[1])
+            tz.append(cartcoords[2])
+            RAfile.append(gcRA)
+            latfile.append(LLAcoords[0])
+            longfile.append(LLAcoords[1])
+            string = "{} {} {} {};\n".format(LLAcoords[0], LLAcoords[1], n2lat.text, n2long.text)
+            myoutput.write(string)
+            #print i
+            #i += 5
+            #sleep(5)
+
+
+    # Plots
+
+    if(plot3d == 1):
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection='3d')
+        p = ax.plot(tx, ty, tz, color='black')
+        
+        # Draw sphere
+        u = np.linspace(0, np.pi, 60)
+        v = np.linspace(0, 2 * np.pi, 60)
+        x = np.outer(np.sin(u), np.sin(v))
+        y = np.outer(np.sin(u), np.cos(v))
+        z = np.outer(np.cos(u), np.ones_like(v))
+        ax.plot_wireframe(x*6371, y*6371, z*6371,color='blue')
+        plt.show()
+
+    if(plotRA == 1):
+        plt.plot(RAfile)
+        plt.ylabel('RA in rad')
+        plt.xlabel('Time (s)')
+        plt.show()
+
+    if(plotLLA == 1):
+        plt.plot(latfile, longfile)
+        plt.ylabel('Lat (r)/ Long (b)')
+        plt.xlabel('Time (s)')
+        plt.show()
+        
+
+
+lat = -36.377518
+long = 145.400044
+height = 100
 TLE = loadTLE()
-sat = TLE['SO-50']
-t = epochDiff(sat)
+sat = TLE['ISS (ZARYA)']
 
-if(1 == plotting):
+dataOutput(0,0,0,0,0)
 
-    tx = []
-    ty = []
-    tz = []
-    RAfile = []
-    latfile = []
-    longfile = []
-
-    for time in range(1, duration):
-        t += 1/86400.0
-        M = calcMA(sat, t)
-        a = calcSMA(sat)
-        v = calcTA(sat, M)
-        P = calcPerigee(sat, a)
-        pRAAN = precession(sat, a, t)[0]
-        pAP = precession(sat, a, t)[1]
-        ArgLat = calcArgLat(v, pAP)
-        RADiff = calcRADiff(sat, ArgLat)
-        r = geoDist(sat, P, v)
-        gcRA = calcGeocentricRA(RADiff, pRAAN, t)
-        gcDec = calcGeocentricDec(ArgLat, RADiff)
-        cartcoords = pol2cart(r, gcRA, gcDec)
-        obsvcoords = LLA2cart(-36.377518, 145.400044, 100)
-        RADec = cart2RADec(cartcoords, obsvcoords)
-        alpha = RADec[0]
-        delta = RADec[1]
-        rg = RADec[2]
-        AzAlt = RADec2AzAlt(alpha, delta, rg, lat)
-        Az = AzAlt[0]
-        Alt = AzAlt[1]
-        LLAcoords = ECEF2LLA(cartcoords)
-
-        tx.append(cartcoords[0])
-        ty.append(cartcoords[1])
-        tz.append(cartcoords[2])
-        RAfile.append(gcRA)
-        latfile.append(LLAcoords[0])
-        longfile.append(LLAcoords[1])
-
-
-# Plots
-
-if(plot3d == 1):
-    fig = plt.figure()
-    ax = fig.add_subplot(1, 1, 1, projection='3d')
-    p = ax.plot(tx, ty, tz)
-    plt.show()
-
-if(plotRA == 1):
-    plt.plot(RAfile)
-    plt.ylabel('RA in rad')
-    plt.xlabel('Time (s)')
-    plt.show()
-
-if(plotLLA == 1):
-    plt.plot(latfile, longfile)
-    plt.ylabel('Lat (r)/ Long (b)')
-    plt.xlabel('Time (s)')
-    plt.show()
-
-
-t = epochDiff(sat)
-M = calcMA(sat, t)
-a = calcSMA(sat)
-v = calcTA(sat, M)
-P = calcPerigee(sat, a)
-pRAAN, pAP = precession(sat, a, t)
-ArgLat = calcArgLat(v, pAP)
-RADiff = calcRADiff(sat, ArgLat)
-r = geoDist(sat, P, v)
-gcRA = calcGeocentricRA(RADiff, pRAAN)
-gcDec = calcGeocentricDec(ArgLat, RADiff)
-cartcoords = pol2cart(r, gcRA, gcDec)
-obsvcoords = LLA2cart(-36.377518, 145.400044, 100)
-alpha, delta, rg = cart2RADec(cartcoords, obsvcoords)
-Az, Alt = RADec2AzAlt(alpha, delta, rg, lat)
-LLAcoords = ECEF2LLA(cartcoords)
-
-print('RA and Dec', alpha, delta)
-print('pol2cart', cartcoords)
-print('ECEF2LLA', LLAcoords)
-# print('RADec2AzAlt', degrees(Az), degrees(Alt))
+print TLE2LLA(sat)
