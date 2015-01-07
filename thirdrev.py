@@ -62,7 +62,41 @@ def loadTLE():
     URLlist = ['http://www.amsat.org/amsat/ftp/keps/current/nasabare.txt',
                'http://www.celestrak.com/NORAD/elements/stations.txt',
                'http://www.celestrak.com/NORAD/elements/sbas.txt',
-               'http://www.celestrak.com/NORAD/elements/tle-new.txt']
+               'http://www.celestrak.com/NORAD/elements/tle-new.txt',
+               'http://www.celestrak.com/NORAD/elements/military.txt',
+               'http://www.celestrak.com/NORAD/elements/cubesat.txt',
+               'http://www.celestrak.com/NORAD/elements/other.txt',
+               'http://www.celestrak.com/NORAD/elements/education.txt',
+               'http://www.celestrak.com/NORAD/elements/radar.txt',
+               'http://www.celestrak.com/NORAD/elements/geodetic.txt',
+               'http://www.celestrak.com/NORAD/elements/engineering.txt',
+               'http://www.celestrak.com/NORAD/elements/science.txt',
+               'http://www.celestrak.com/NORAD/elements/musson.txt',
+               'http://www.celestrak.com/NORAD/elements/nnss.txt',
+               'http://www.celestrak.com/NORAD/elements/galileo.txt',
+               'http://www.celestrak.com/NORAD/elements/beidou.txt',
+               'http://www.celestrak.com/NORAD/elements/gps-ops.txt',
+               'http://www.celestrak.com/NORAD/elements/glo-ops.txt',
+               'http://www.celestrak.com/NORAD/elements/amateur.txt',
+               'http://www.celestrak.com/NORAD/elements/x-comm.txt',
+               'http://www.celestrak.com/NORAD/elements/other-comm.txt',
+               'http://www.celestrak.com/NORAD/elements/iridium.txt',
+               'http://www.celestrak.com/NORAD/elements/orbcomm.txt',
+               'http://www.celestrak.com/NORAD/elements/globalstar.txt',
+               'http://www.celestrak.com/NORAD/elements/molniya.txt',
+               'http://www.celestrak.com/NORAD/elements/raduga.txt',
+               'http://www.celestrak.com/NORAD/elements/gorizont.txt',
+               'http://www.celestrak.com/NORAD/elements/intelsat.txt',
+               'http://www.celestrak.com/NORAD/elements/geo.txt',
+               'http://www.celestrak.com/NORAD/elements/argos.txt',
+               'http://www.celestrak.com/NORAD/elements/tdrss.txt',
+               'http://www.celestrak.com/NORAD/elements/sarsat.txt',
+               'http://www.celestrak.com/NORAD/elements/dmc.txt',
+               'http://www.celestrak.com/NORAD/elements/resource.txt',
+               'http://www.celestrak.com/NORAD/elements/noaa.txt',
+               'http://www.celestrak.com/NORAD/elements/goes.txt',
+               'http://www.celestrak.com/NORAD/elements/weather.txt'
+               ]
     TLE = {}
     
     try:
@@ -173,11 +207,18 @@ def calcEA(sat, M):
 
     # Our delta E term
     Ed = 100000000
+    i = 0
     while(Ed > 0.000000001):
+        if i > 50:
+            Edash = e**2 * sin(M)*cos(M)
+            Edashdash = 1.0/2 * e**3 * sin(M) * (3*cos(M)**2 - 1)
+            E = M + e*sin(M) + Edash + Edashdash
+            return E
+            yeah
         E = E0 - (E0 - e*sin(E0) - M)/(1-e*cos(E0))
         Ed = abs(E-E0)
         E0 = E
-
+        i += 1
     return E
 
 
@@ -287,20 +328,16 @@ def calcRADiff(sat, ArgLat):
     return RADiff
 
 
-def calcGeocentricRA(RADiff, pRAAN, manual_t=0):
+def calcGeocentricRADec(RADiff, pRAAN, ArgLat, manual_t=0):
     # Partially working, now accounts for rotation of earth
     # Inputs should be in radians, returns in radians
     GMST = utcDatetime2gmst(datetime.utcnow())*86400.0/86164.0
     earthrot = radians(GMST + manual_t*360.0)
     gcRA = -earthrot + RADiff + pRAAN - 2*pi*(int((RADiff + pRAAN)/(2*pi)))
 
-    return gcRA
-
-
-def calcGeocentricDec(ArgLat, RADiff):
-    # Inputs in radians, output in radians
     gcDec = (copysign(1, sin(ArgLat))) * acos(cos(ArgLat)/cos(RADiff))
-    return gcDec
+    
+    return [gcRA, gcDec]
 
 
 def pol2cart(r, gcRA, gcDec):
@@ -319,7 +356,7 @@ def LLA2cart(recvLat=0, recvLong=0, recvAlt=100):
     # Lat long need to be in degrees, altitude in m
     # Returns in km
     # Perform geodetic to geocentric conversions
-    obsgcDec = radians(recvLat)
+    """obsgcDec = radians(recvLat)
 
     # If not working, check whether the recvLong is needed
     obsgcRA = radians(utcDatetime2gmst(datetime.utcnow()) + recvLong)
@@ -337,8 +374,22 @@ def LLA2cart(recvLat=0, recvLong=0, recvAlt=100):
     bg = rg * sin(obsgcRA)*cos(obsgcDec)
     cg = rg * sin(obsgcDec)
 
-    return [ag, bg, cg]
-
+    return [ag, bg, cg]"""
+    #obsvgcDec = radians(recvLat)
+    #obsvgcRA = radians(utcDatetime2gmst(datetime.utcnow()) + recvLong)
+    recvLat = radians(recvLat)
+    recvLong = radians(recvLong)
+    h = recvAlt
+    
+    a = 6378.137
+    b = 6356.75231424518
+    ecc = sqrt((a**2 - b**2)/a**2)
+    N = a/sqrt(1 - ecc**2 * sin(recvLat)**2)
+    X = (N + h)* cos(recvLat) * cos(recvLong)
+    Y = (N + h)* cos(recvLat) * sin(recvLong)
+    Z = (b**2/a**2 * N + h)*sin(recvLat)
+    
+    return [X, Y, Z]
 
 def cart2RADec(satpos, obspos):
     # Returns in radians
@@ -350,11 +401,11 @@ def cart2RADec(satpos, obspos):
     zs = zg - cg
 
     if ys > 0 and xs > 0:
-        alpha = atan(ys/xs)
+        alpha = atan2(ys,xs)
     elif xs < 0:
-        alpha = pi + atan(ys/xs)
+        alpha = pi + atan2(ys,xs)
     elif ys < 0 and xs > 0:
-        alpha = 2*pi - atan(ys/xs)
+        alpha = 2*pi - atan2(ys,xs)
 
     r = sqrt(xs**2 + ys**2 + zs**2)
     delta = asin(zs/r)
@@ -362,7 +413,7 @@ def cart2RADec(satpos, obspos):
     return [alpha, delta, r]
 
 
-def RADec2AzAlt(alpha, delta, r, lat):
+"""def RADec2AzAlt(alpha, delta, r, lat):
     # alpha, delta in rad, lat in deg, r in km
     # Will return in radians
     HA = radians(utcDatetime2gmst(datetime.utcnow()))
@@ -374,9 +425,23 @@ def RADec2AzAlt(alpha, delta, r, lat):
     if sin(HA) > 0:
         Az = 360 - Az
 
-    return [Az, Alt]
+    return [Az, Alt]"""
 
 
+def LLA2AzEl(satlat, satlong, obsvlat, obsvlong):
+    
+    satlat = radians(satlat)
+    satlong = radians(satlong)
+    obsvlat = radians(obsvlat)
+    obsvlong = radians(obsvlong)
+    
+    dlong = satlong - obsvlong
+    azimuth = atan2(sin(dlong)*cos(satlat), cos(obsvlat)*sin(satlat) - sin(obsvlat)*cos(satlat)*cos(dlong))
+    azimuth = (azimuth + 2 * pi) % (2*pi)
+    elevation = 0
+    return [azimuth,elevation]
+    
+    
 def ECEF2LLA(pos):
     # Confirmed working
     X = pos[0]
@@ -391,7 +456,7 @@ def ECEF2LLA(pos):
     long = atan2(Y, X)
 
     error = 1111
-    # Earth radius at equator and poles
+    # Earth radius at equator and poles, metres
     a = 6378137.0
     b = 6356752.31424518
     e = sqrt((a**2 - b**2)/(a**2))
@@ -432,12 +497,11 @@ def TLE2LLA(sat, manual_t = 0):
     ArgLat = calcArgLat(v, pAP)
     RADiff = calcRADiff(sat, ArgLat)
     r = geoDist(sat, P, v)
-    gcRA = calcGeocentricRA(RADiff, pRAAN)
-    gcDec = calcGeocentricDec(ArgLat, RADiff)
+    gcRA,gcDec = calcGeocentricRADec(RADiff, pRAAN, ArgLat)
     cartcoords = pol2cart(r, gcRA, gcDec)
     obsvcoords = LLA2cart(lat, long, height)
+    
     alpha, delta, rg = cart2RADec(cartcoords, obsvcoords)
-    Az, Alt = RADec2AzAlt(alpha, delta, rg, lat)
     LLAcoords = ECEF2LLA(cartcoords)
     return LLAcoords
 
@@ -451,7 +515,7 @@ def dataOutput(plot3d, plotRA, plotLLA, filewrite, duration):
         browser = webdriver.Chrome(executable_path = path_to_chromedriver)
         url = 'http://www.n2yo.com/?s=27607'
         browser.get(url)
-        sleep(10)
+        sleep(5)
         tx = []
         ty = []
         tz = []
@@ -463,47 +527,27 @@ def dataOutput(plot3d, plotRA, plotLLA, filewrite, duration):
         t = epochDiff(sat)
 
         for time in xrange(1, duration, 10):
-        #while(i<7000):
-            #t = epochDiff(sat)
-            t += 1/86400.0
-            M = calcMA(sat, t)
-            a = calcSMA(sat)
-            v = calcTA(sat, M)
-            P = calcPerigee(sat, a)
-            pRAAN = precession(sat, a, t)[0]
-            pAP = precession(sat, a, t)[1]
-            ArgLat = calcArgLat(v, pAP)
-            RADiff = calcRADiff(sat, ArgLat)
-            r = geoDist(sat, P, v)
-            gcRA = calcGeocentricRA(RADiff, pRAAN)
-            gcDec = calcGeocentricDec(ArgLat, RADiff)
-            cartcoords = pol2cart(r, gcRA, gcDec)
-            obsvcoords = LLA2cart(-36.377518, 145.400044, 100)
-            RADec = cart2RADec(cartcoords, obsvcoords)
-            alpha = RADec[0]
-            delta = RADec[1]
-            rg = RADec[2]
-            AzAlt = RADec2AzAlt(alpha, delta, rg, lat)
-            Az = AzAlt[0]
-            Alt = AzAlt[1]
-            LLAcoords = ECEF2LLA(cartcoords)
-            
+            satlat,satlong = TLE2LLA(sat)
+            obsvlat = -36.377518
+            obsvlong = 145.400044
+            az,alt = LLA2AzEl(satlat, satlong, obsvlat, obsvlong)
             # Lets webscrape
 
-            n2lat = browser.find_element_by_id("satlat")
-            n2long = browser.find_element_by_id("satlng")
-
-            tx.append(cartcoords[0])
-            ty.append(cartcoords[1])
-            tz.append(cartcoords[2])
-            RAfile.append(gcRA)
-            latfile.append(LLAcoords[0])
-            longfile.append(LLAcoords[1])
-            string = "{} {} {} {};\n".format(LLAcoords[0], LLAcoords[1], n2lat.text, n2long.text)
+            n2lat = browser.find_element_by_id("satlat").text
+            n2long = browser.find_element_by_id("satlng").text
+            n2azimuth = browser.find_element_by_id("sataz").text
+            
+            #tx.append(cartcoords[0])
+            #ty.append(cartcoords[1])
+            #tz.append(cartcoords[2])
+            latfile.append(satlat)
+            longfile.append(satlong)
+            string = "{} {} {} {} {} {};\n".format(satlat, satlong, degrees(az), n2lat, n2long, n2azimuth)
+            print string
             myoutput.write(string)
-            #print i
-            #i += 5
-            #sleep(5)
+            print i
+            i += 5
+            sleep(5)
 
 
     # Plots
@@ -536,12 +580,42 @@ def dataOutput(plot3d, plotRA, plotLLA, filewrite, duration):
         
 
 
+
+
 lat = -36.377518
 long = 145.400044
 height = 100
 TLE = loadTLE()
 sat = TLE['ISS (ZARYA)']
 
-dataOutput(0,0,0,0,0)
+xc = []
+yc = []
+zc = []
+"""for key in TLE:
+    t1,t2,t3 = TLE2LLA(TLE[key])[1]
+    xc.append(t1)
+    yc.append(t2)
+    zc.append(t3)
+    
+fig = plt.figure()
+ax = fig.add_subplot(111, projection='3d')
+p = ax.scatter(xc, yc, zc, color='black')
 
-print TLE2LLA(sat)
+# Draw sphere
+u = np.linspace(0, 2 * np.pi, 60)
+v = np.linspace(0, 2 * np.pi, 60)
+x = np.outer(np.sin(u), np.sin(v))
+y = np.outer(np.sin(u), np.cos(v))
+z = np.outer(np.cos(u), np.ones_like(v))
+ax.plot_wireframe(x*6371, y*6371, z*6371,color='blue')
+plt.show()
+"""
+
+dataOutput(0,0,0,1,6000)
+
+satlat,satlong = TLE2LLA(sat)
+obsvlat = lat
+obsvlong = long
+
+az,alt = LLA2AzEl(satlat, satlong, obsvlat, obsvlong)
+print az,alt
