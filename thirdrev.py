@@ -8,6 +8,7 @@ from time import sleep
 import numpy as np
 from selenium import webdriver
 
+
 def ymd2jd(year, month, day):
     if month == 1 or month == 2:
         yprime = year - 1
@@ -47,7 +48,7 @@ def utcDatetime2gmst(datetimeObj):
     minute = time.minute/60.0
     second = time.second / 3600.0
     microsecond = time.microsecond/3600000000
-    
+
     UT = (hour + minute + second + microsecond) * 1.002737909
     T0 += UT
 
@@ -98,16 +99,16 @@ def loadTLE():
                'http://www.celestrak.com/NORAD/elements/weather.txt'
                ]
     TLE = {}
-    
+
     try:
-        TLEfile = open('TLE.txt','r')
+        TLEfile = open('TLE.txt', 'r')
         curr_time = datetime.utcnow()
         lines = TLEfile.readlines()
-        TLE_time = datetime.strptime(lines[0].rstrip(),"%Y %m %d %H:%M")
+        TLE_time = datetime.strptime(lines[0].rstrip(), "%Y %m %d %H:%M")
         if (curr_time - TLE_time) > timedelta(days = 3):
             TLEfile.close()
             # Open instead for writing
-            TLEfile = open('TLE.txt','w')
+            TLEfile = open('TLE.txt', 'w')
             TLEfile.write(datetime.utcnow().strftime("%Y %m %d %H:%M") + '\n')
             print('Current TLE older than 3 days, downloading new')
             for URL in URLlist:
@@ -115,7 +116,7 @@ def loadTLE():
                 data = response.content
                 TLEfile.write(data)
                 TLE.update(interpretTLE(data))
-                
+
             return TLE
         else:
             print('Using cached TLE: ' + str(lines[0]))
@@ -123,17 +124,17 @@ def loadTLE():
             return TLE
     except:
         print('Downloading TLE')
-        TLEfile = open('TLE.txt','w')
+        TLEfile = open('TLE.txt', 'w')
         TLEfile.write(datetime.utcnow().strftime("%Y %m %d %H:%M" + '\n'))
-        
+
         for URL in URLlist:
             response = requests.get(URL)
             data = response.content
             TLEfile.write(data)
             TLE.update(interpretTLE(data))
-            
+
         return TLE
-    
+
 
 def interpretTLE(data):
     # Split the data into lines
@@ -197,6 +198,7 @@ def calcMA(sat, t):
     Mt = M0 + 360*(n*t - int(n*t) - int((M0 + 360*(n*t - int(n*t)))/(360)))
     return radians(Mt)
 
+
 def calcEA(sat, M):
     # I think this returns it in radians, seems consistent at least
     E0 = sat['MNANOM']
@@ -224,13 +226,8 @@ def calcEA(sat, M):
 
 def calcTA(sat, M):
     # Confirmed working
-    # TODO: increase accuracy of this, maybe higher order or iterative
-    # First we calculate eccentric anomaly, third order
     # This returns v in radians
     e = sat['ECCENTRICITY']
-    #Edash = e**2 * sin(M)*cos(M)
-    #Edashdash = 1.0/2 * e**3 * sin(M) * (3*cos(M)**2 - 1)
-    #E = M + e*sin(M) + Edash + Edashdash
 
     E = calcEA(sat, M)
     x = sqrt(1-e)*cos(E/2)
@@ -310,6 +307,7 @@ def calcArgLat(v, pAP):
     # Confirmed working
     # Inputs should be in radians, returns in radians
     Lat = pAP + v - 2*pi*(int((pAP + v)/(2*pi)))
+
     return Lat
 
 
@@ -336,7 +334,7 @@ def calcGeocentricRADec(RADiff, pRAAN, ArgLat, manual_t=0):
     gcRA = -earthrot + RADiff + pRAAN - 2*pi*(int((RADiff + pRAAN)/(2*pi)))
 
     gcDec = (copysign(1, sin(ArgLat))) * acos(cos(ArgLat)/cos(RADiff))
-    
+
     return [gcRA, gcDec]
 
 
@@ -375,8 +373,6 @@ def LLA2cart(recvLat=0, recvLong=0, recvAlt=100):
     cg = rg * sin(obsgcDec)
 
     return [ag, bg, cg]"""
-    #obsvgcDec = radians(recvLat)
-    #obsvgcRA = radians(utcDatetime2gmst(datetime.utcnow()) + recvLong)
     recvLat = radians(recvLat)
     recvLong = radians(recvLong)
     h = recvAlt
@@ -428,7 +424,7 @@ def cart2RADec(satpos, obspos):
     return [Az, Alt]"""
 
 
-def LLA2AzEl(satlat, satlong, obsvlat, obsvlong):
+def LLA2AzEl(satlat, satlong, obsvlat, obsvlong, satpos, obsvpos):
     
     satlat = radians(satlat)
     satlong = radians(satlong)
@@ -438,7 +434,15 @@ def LLA2AzEl(satlat, satlong, obsvlat, obsvlong):
     dlong = satlong - obsvlong
     azimuth = atan2(sin(dlong)*cos(satlat), cos(obsvlat)*sin(satlat) - sin(obsvlat)*cos(satlat)*cos(dlong))
     azimuth = (azimuth + 2 * pi) % (2*pi)
-    elevation = 0
+    
+    xd, yd, zd = satpos
+    x, y, z = obsvpos
+    
+    dx = xd - x
+    dy = yd - y
+    dz = zd - z
+    
+    elevation = pi/2.0 - acos((x*dx + y*dy + z*dz) / sqrt((x**2+y**2+z**2)*(dx**2+dy**2+dz**2))) 
     return [azimuth,elevation]
     
     
@@ -499,52 +503,61 @@ def TLE2LLA(sat, manual_t = 0):
     r = geoDist(sat, P, v)
     gcRA,gcDec = calcGeocentricRADec(RADiff, pRAAN, ArgLat)
     cartcoords = pol2cart(r, gcRA, gcDec)
-    obsvcoords = LLA2cart(lat, long, height)
+    obsvlat = -36.377518
+    obsvlong = 145.400044
+    height = 100
+    obsvcoords = LLA2cart(obsvlat, obsvlong, height)
+    
     
     alpha, delta, rg = cart2RADec(cartcoords, obsvcoords)
     LLAcoords = ECEF2LLA(cartcoords)
-    return LLAcoords
+    satlat,satlong = LLAcoords
+    az,alt = LLA2AzEl(satlat, satlong, obsvlat, obsvlong, cartcoords, obsvcoords)
+    return [LLAcoords, az, alt]
 
-def dataOutput(plot3d, plotRA, plotLLA, filewrite, duration):
 
-    plotting = max(plot3d, plotRA, plotLLA, filewrite)
+def dataOutput(plot3d, plotRA, plotLLA, plotAz, duration):
+
+    plotting = max(plot3d, plotRA, plotLLA, plotAz)
     
     if(1 == plotting):
-        myoutput = open('thirdrev.txt','w')
         path_to_chromedriver = 'C:\Users\Anthony\OneDrive\Programming\Sats\Sats\chromedriver.exe' # change path as needed
         browser = webdriver.Chrome(executable_path = path_to_chromedriver)
-        url = 'http://www.n2yo.com/?s=27607'
+        url = 'http://www.n2yo.com/?s=25544'
         browser.get(url)
-        sleep(5)
+        sleep(10)
         tx = []
         ty = []
         tz = []
         RAfile = []
         latfile = []
         longfile = []
+        azfile = []
+        elfile = []
         i = 0
 
         t = epochDiff(sat)
 
-        for time in xrange(1, duration, 10):
-            satlat,satlong = TLE2LLA(sat)
-            obsvlat = -36.377518
-            obsvlong = 145.400044
-            az,alt = LLA2AzEl(satlat, satlong, obsvlat, obsvlong)
+        for time in xrange(1, duration, 5):
+            output = TLE2LLA(sat)
+            satlat,satlong = output[0]
+            az = degrees(output[1])
+            el = degrees(output[2])
+            
             # Lets webscrape
 
             n2lat = browser.find_element_by_id("satlat").text
             n2long = browser.find_element_by_id("satlng").text
             n2azimuth = browser.find_element_by_id("sataz").text
+            n2el = browser.find_element_by_id("satel").text
             
             #tx.append(cartcoords[0])
             #ty.append(cartcoords[1])
             #tz.append(cartcoords[2])
             latfile.append(satlat)
             longfile.append(satlong)
-            string = "{} {} {} {} {} {};\n".format(satlat, satlong, degrees(az), n2lat, n2long, n2azimuth)
-            print string
-            myoutput.write(string)
+            azfile.append(abs(float(n2azimuth) - az))
+            elfile.append(abs(float(n2el) - el))
             print i
             i += 5
             sleep(5)
@@ -577,7 +590,16 @@ def dataOutput(plot3d, plotRA, plotLLA, filewrite, duration):
         plt.ylabel('Lat (r)/ Long (b)')
         plt.xlabel('Time (s)')
         plt.show()
-        
+    
+    if(plotAz == 1):
+        t = []
+        for i in range(0,len(azfile)):
+            t.append(i)
+            
+        plt.plot(t,azfile,'b',t,elfile,'r')
+        plt.ylabel('Azimuth error (deg)')
+        plt.xlabel('Time (s)')
+        plt.show()
 
 
 
@@ -611,11 +633,13 @@ ax.plot_wireframe(x*6371, y*6371, z*6371,color='blue')
 plt.show()
 """
 
-dataOutput(0,0,0,1,6000)
+dataOutput(0,0,0,0,6000)
 
-satlat,satlong = TLE2LLA(sat)
+#satlat,satlong = TLE2LLA(sat)
 obsvlat = lat
 obsvlong = long
-
-az,alt = LLA2AzEl(satlat, satlong, obsvlat, obsvlong)
-print az,alt
+output = TLE2LLA(sat)
+satlat,satlong = output[0]
+az = degrees(output[1])
+el = degrees(output[2])
+print az,el
