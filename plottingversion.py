@@ -105,7 +105,7 @@ def loadTLE():
         curr_time = datetime.utcnow()
         lines = TLEfile.readlines()
         TLE_time = datetime.strptime(lines[0].rstrip(), "%Y %m %d %H:%M")
-        if (curr_time - TLE_time) > timedelta(days = 3):
+        if (curr_time - TLE_time) > timedelta(days=3):
             TLEfile.close()
             # Open instead for writing
             TLEfile = open('TLE.txt', 'w')
@@ -216,7 +216,6 @@ def calcEA(sat, M):
             Edashdash = 1.0/2 * e**3 * sin(M) * (3*cos(M)**2 - 1)
             E = M + e*sin(M) + Edash + Edashdash
             return E
-            yeah
         E = E0 - (E0 - e*sin(E0) - M)/(1-e*cos(E0))
         Ed = abs(E-E0)
         E0 = E
@@ -346,46 +345,25 @@ def pol2cart(r, gcRA, gcDec):
     Xg = r * cos(gcRA)*cos(gcDec)
     Yg = r * sin(gcRA)*cos(gcDec)
     Zg = r * sin(gcDec)
+
     return [Xg, Yg, Zg]
 
 
-def LLA2cart(recvLat=0, recvLong=0, recvAlt=100):
+def LLA2cart(recvLat, recvLong, h):
     # Confirmed working
     # Lat long need to be in degrees, altitude in m
     # Returns in km
-    # Perform geodetic to geocentric conversions
-    """obsgcDec = radians(recvLat)
 
-    # If not working, check whether the recvLong is needed
-    obsgcRA = radians(utcDatetime2gmst(datetime.utcnow()) + recvLong)
-
-    while(obsgcRA > 2*pi):
-        obsgcRA -= 2*pi
-
-    # Calculate earth center to receiver location
-    Re = 6378.135
-    Rp = 6356.752
-
-    rg = sqrt((cos(obsgcDec)/Re)**2 + (sin(obsgcDec)/Rp)**2) + recvAlt/1000
-
-    ag = rg * cos(obsgcRA)*cos(obsgcDec)
-    bg = rg * sin(obsgcRA)*cos(obsgcDec)
-    cg = rg * sin(obsgcDec)
-
-    return [ag, bg, cg]"""
-    recvLat = radians(recvLat)
-    recvLong = radians(recvLong)
-    h = recvAlt
-    
     a = 6378.137
     b = 6356.75231424518
     ecc = sqrt((a**2 - b**2)/a**2)
     N = a/sqrt(1 - ecc**2 * sin(recvLat)**2)
-    X = (N + h)* cos(recvLat) * cos(recvLong)
-    Y = (N + h)* cos(recvLat) * sin(recvLong)
+    X = (N + h) * cos(recvLat) * cos(recvLong)
+    Y = (N + h) * cos(recvLat) * sin(recvLong)
     Z = (b**2/a**2 * N + h)*sin(recvLat)
-    
+
     return [X, Y, Z]
+
 
 def cart2RADec(satpos, obspos):
     # Returns in radians
@@ -397,11 +375,11 @@ def cart2RADec(satpos, obspos):
     zs = zg - cg
 
     if ys > 0 and xs > 0:
-        alpha = atan2(ys,xs)
+        alpha = atan2(ys, xs)
     elif xs < 0:
-        alpha = pi + atan2(ys,xs)
+        alpha = pi + atan2(ys, xs)
     elif ys < 0 and xs > 0:
-        alpha = 2*pi - atan2(ys,xs)
+        alpha = 2*pi - atan2(ys, xs)
 
     r = sqrt(xs**2 + ys**2 + zs**2)
     delta = asin(zs/r)
@@ -409,43 +387,27 @@ def cart2RADec(satpos, obspos):
     return [alpha, delta, r]
 
 
-"""def RADec2AzAlt(alpha, delta, r, lat):
-    # alpha, delta in rad, lat in deg, r in km
-    # Will return in radians
-    HA = radians(utcDatetime2gmst(datetime.utcnow()))
-    lat = radians(lat)
-
-    Alt = asin(sin(delta)*sin(lat) + cos(delta)*cos(lat)*cos(HA))
-    Az = acos((sin(delta) - sin(Alt)*sin(lat))/(cos(Alt)*cos(lat)))
-
-    if sin(HA) > 0:
-        Az = 360 - Az
-
-    return [Az, Alt]"""
-
-
 def LLA2AzEl(satlat, satlong, obsvlat, obsvlong, satpos, obsvpos):
-    
+
     satlat = radians(satlat)
     satlong = radians(satlong)
-    obsvlat = radians(obsvlat)
-    obsvlong = radians(obsvlong)
-    
+
     dlong = satlong - obsvlong
     azimuth = atan2(sin(dlong)*cos(satlat), cos(obsvlat)*sin(satlat) - sin(obsvlat)*cos(satlat)*cos(dlong))
     azimuth = (azimuth + 2 * pi) % (2*pi)
-    
+
     xd, yd, zd = satpos
     x, y, z = obsvpos
-    
+
     dx = xd - x
     dy = yd - y
     dz = zd - z
-    
-    elevation = pi/2.0 - acos((x*dx + y*dy + z*dz) / sqrt((x**2+y**2+z**2)*(dx**2+dy**2+dz**2))) 
-    return [azimuth,elevation]
-    
-    
+
+    elevation = pi/2.0 - acos((x*dx + y*dy + z*dz) / sqrt((x**2+y**2+z**2)*(dx**2+dy**2+dz**2)))
+
+    return [azimuth, elevation]
+
+
 def ECEF2LLA(pos):
     # Confirmed working
     X = pos[0]
@@ -468,7 +430,6 @@ def ECEF2LLA(pos):
 
     while(error > 0.0000001):
         if(i > 50):
-            # print("Newton-Raphson failed to converge, approximating")
             lati = atan(Z/sqrt(X**2 + Y**2))
 
             while(long > pi):
@@ -491,7 +452,8 @@ def ECEF2LLA(pos):
 
     return [degrees(lati), degrees(long)]
 
-def TLE2LLA(sat, manual_t = 0):
+
+def TLE2LLA(sat, obsvLLA, manual_t=0):
     t = epochDiff(sat) + manual_t/86400.0
     M = calcMA(sat, t)
     a = calcSMA(sat)
@@ -501,28 +463,27 @@ def TLE2LLA(sat, manual_t = 0):
     ArgLat = calcArgLat(v, pAP)
     RADiff = calcRADiff(sat, ArgLat)
     r = geoDist(sat, P, v)
-    gcRA,gcDec = calcGeocentricRADec(RADiff, pRAAN, ArgLat)
+    gcRA, gcDec = calcGeocentricRADec(RADiff, pRAAN, ArgLat)
     cartcoords = pol2cart(r, gcRA, gcDec)
-    obsvlat = -36.377518
-    obsvlong = 145.400044
-    height = 100
+    obsvlat, obsvlong, height = obsvLLA
+
     obsvcoords = LLA2cart(obsvlat, obsvlong, height)
-    
-    
+
     alpha, delta, rg = cart2RADec(cartcoords, obsvcoords)
     LLAcoords = ECEF2LLA(cartcoords)
-    satlat,satlong = LLAcoords
-    az,alt = LLA2AzEl(satlat, satlong, obsvlat, obsvlong, cartcoords, obsvcoords)
-    return [LLAcoords, az, alt]
+    satlat, satlong = LLAcoords
+    azimuth, elevation = LLA2AzEl(satlat, satlong, obsvlat, obsvlong, cartcoords, obsvcoords)
+
+    return [LLAcoords, azimuth, elevation, cartcoords]
 
 
-def dataOutput(plot3d, plotRA, plotLLA, plotAz, duration):
+def dataOutput(plot3d, plotRA, plotLLA, plotAz, duration, obsvLLA):
 
     plotting = max(plot3d, plotRA, plotLLA, plotAz)
-    
+
     if(1 == plotting):
-        path_to_chromedriver = 'C:\Users\Anthony\OneDrive\Programming\Sats\Sats\chromedriver.exe' # change path as needed
-        browser = webdriver.Chrome(executable_path = path_to_chromedriver)
+        path_to_chromedriver = 'C:\Users\Anthony\OneDrive\Programming\Sats\Sats\chromedriver.exe'
+        browser = webdriver.Chrome(executable_path=path_to_chromedriver)
         url = 'http://www.n2yo.com/?s=25544'
         browser.get(url)
         sleep(10)
@@ -539,21 +500,21 @@ def dataOutput(plot3d, plotRA, plotLLA, plotAz, duration):
         t = epochDiff(sat)
 
         for time in xrange(1, duration, 5):
-            output = TLE2LLA(sat)
-            satlat,satlong = output[0]
+            output = TLE2LLA(sat, obsvLLA)
+            satlat, satlong = output[0]
             az = degrees(output[1])
             el = degrees(output[2])
-            
-            # Lets webscrape
+            cartcoords = output[3]
 
+            # Lets webscrape
             n2lat = browser.find_element_by_id("satlat").text
             n2long = browser.find_element_by_id("satlng").text
             n2azimuth = browser.find_element_by_id("sataz").text
             n2el = browser.find_element_by_id("satel").text
-            
-            #tx.append(cartcoords[0])
-            #ty.append(cartcoords[1])
-            #tz.append(cartcoords[2])
+
+            tx.append(cartcoords[0])
+            ty.append(cartcoords[1])
+            tz.append(cartcoords[2])
             latfile.append(satlat)
             longfile.append(satlong)
             azfile.append(abs(float(n2azimuth) - az))
@@ -562,21 +523,20 @@ def dataOutput(plot3d, plotRA, plotLLA, plotAz, duration):
             i += 5
             sleep(5)
 
-
     # Plots
 
     if(plot3d == 1):
         fig = plt.figure()
         ax = fig.add_subplot(111, projection='3d')
         p = ax.plot(tx, ty, tz, color='black')
-        
+
         # Draw sphere
         u = np.linspace(0, np.pi, 60)
         v = np.linspace(0, 2 * np.pi, 60)
         x = np.outer(np.sin(u), np.sin(v))
         y = np.outer(np.sin(u), np.cos(v))
         z = np.outer(np.cos(u), np.ones_like(v))
-        ax.plot_wireframe(x*6371, y*6371, z*6371,color='blue')
+        ax.plot_wireframe(x*6371, y*6371, z*6371, color='blue')
         plt.show()
 
     if(plotRA == 1):
@@ -590,35 +550,29 @@ def dataOutput(plot3d, plotRA, plotLLA, plotAz, duration):
         plt.ylabel('Lat (r)/ Long (b)')
         plt.xlabel('Time (s)')
         plt.show()
-    
+
     if(plotAz == 1):
         t = []
-        for i in range(0,len(azfile)):
+        for i in range(0, len(azfile)):
             t.append(i)
-            
-        plt.plot(t,azfile,'b',t,elfile,'r')
+
+        plt.plot(t, azfile, 'b', t, elfile, 'r')
         plt.ylabel('Azimuth error (deg)')
         plt.xlabel('Time (s)')
         plt.show()
 
+#TLE = loadTLE()
+#sat = TLE['ISS (ZARYA)']
 
-
-
-lat = -36.377518
-long = 145.400044
-height = 100
-TLE = loadTLE()
-sat = TLE['ISS (ZARYA)']
-
-xc = []
-yc = []
-zc = []
+#xc = []
+#yc = []
+#zc = []
 """for key in TLE:
     t1,t2,t3 = TLE2LLA(TLE[key])[1]
     xc.append(t1)
     yc.append(t2)
     zc.append(t3)
-    
+
 fig = plt.figure()
 ax = fig.add_subplot(111, projection='3d')
 p = ax.scatter(xc, yc, zc, color='black')
@@ -632,14 +586,10 @@ z = np.outer(np.cos(u), np.ones_like(v))
 ax.plot_wireframe(x*6371, y*6371, z*6371,color='blue')
 plt.show()
 """
+#obsvLLA = [radians(-36.377518), radians(145.400044), 100]
+#dataOutput(0, 0, 0, 0, obsvLLA, 6000)
 
-dataOutput(0,0,0,0,6000)
-
-#satlat,satlong = TLE2LLA(sat)
-obsvlat = lat
-obsvlong = long
-output = TLE2LLA(sat)
-satlat,satlong = output[0]
-az = degrees(output[1])
-el = degrees(output[2])
-print az,el
+#output = TLE2LLA(sat, obsvLLA)
+#satlat, satlong = output[0]
+#az = degrees(output[1])
+#el = degrees(output[2])
