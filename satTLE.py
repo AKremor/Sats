@@ -4,6 +4,7 @@ from math import (floor, pi, radians, degrees, sin, cos,
 import requests
 import sys
 
+
 def ymd2jd(year, month, day):
     # need to find the source for this
     if month == 1 or month == 2:
@@ -53,39 +54,41 @@ def utcDatetime2gmst(datetimeObj):
 
     return GST
 
+
 def downloadTLE():
     # Download TLE data from all the URL's in sitelist.txt
     # And return parsed TLE's as dict TLE
-    
+
     TLE = {}
     # Load all TLE sites from file.
     try:
-        sitelist = open('sitelist.txt','r')
+        siteList = open('sitelist.txt', 'r')
     except IOError:
         print 'List of TLE sites could not be opened'
         sys.exit(1)
 
-    URLlist = sitelist.read().splitlines()
-    
+    URLlist = siteList.read().splitlines()
+
     TLEfile = open('TLE.txt', 'w')
     TLEfile.write(datetime.utcnow().strftime("%Y %m %d %H:%M") + '\n')
-    
+
     for URL in URLlist:
         print('Downloading from ' + URL)
         response = requests.get(URL)
         data = response.content
         TLEfile.write(data)
         TLE.update(interpretTLE(data))
-        
+
     return TLE
-        
+
+
 def loadTLE():
     # Check if we have a TLE file that is recent, or download
     # a new one.
 
     TLE = {}
     try:
-    
+
         TLEfile = open('TLE.txt', 'r')
         lines = TLEfile.readlines()
         TLE_time = datetime.strptime(lines[0].rstrip(), "%Y %m %d %H:%M")
@@ -97,29 +100,34 @@ def loadTLE():
             if raw_input('TLE\'s old, fetch new? (y/n) ').lower() == 'y':
                 print('Current TLE older than 3 days, downloading new')
                 TLE = downloadTLE()
+
                 return TLE
 
             else:
                 print('Using cached TLE: ' + str(lines[0]))
                 TLE.update(interpretTLE(lines[1:]))
+
                 return TLE
 
         else:
             # TLE within date so parse them
             print('Using cached TLE: ' + str(lines[0]))
             TLE.update(interpretTLE(lines[1:]))
+
             return TLE
 
     except IOError:
         # No TLE file exists
         print('Cannot find TLE.txt, downloading TLE')
         TLE = downloadTLE()
+
         return TLE
 
 
 def interpretTLE(data):
     # Take a raw set of TLE's and store them in a dict
     # Split the data into lines
+
     if type(data) is not list:
         data = data.split('\n')
     TLE = {}
@@ -146,7 +154,7 @@ def interpretTLE(data):
 def epochDiff(sat):
     # Calculate difference between current time and the
     # time the TLE was set (epoch) in solar days
-    
+
     epoch = str(sat['EPOCHTIME'])
     epochYear = int('20'+epoch[:2])
     epochDays = float(epoch[2:])
@@ -168,16 +176,16 @@ def epochDiff(sat):
     curr_time = datetime.utcnow()
     # Time delta between now and epoch is therefore, in seconds
     timedelta = (curr_time - epoch_time)
+
     return timedelta.total_seconds()/86400
 
 
 def calcMA(sat, t):
     # Returns a mean anomaly between 0:2*pi
-
     M0 = sat['MNANOM']
     n = sat['MNMOTION']
-
     Mt = M0 + 360*(n*t - int(n*t) - int((M0 + 360*(n*t - int(n*t)))/(360)))
+
     return radians(Mt)
 
 
@@ -186,33 +194,32 @@ def calcEA(sat, M):
     E0 = sat['MNANOM']
     e = sat['ECCENTRICITY']
 
-    # Initial guess
-    Ed = (M + e*sin(E0) - E0)/(1-e*cos(E0))
-
-    # Our delta E term
-    Ed = 100000000
+    # Our error term
+    E_error = 100000000
     i = 0
-    while(Ed > 0.000000001):
+    while(E_error > 0.000000001):
         if i > 50:
+            # If we aren't converging go for a best guess
             Edash = e**2 * sin(M)*cos(M)
             Edashdash = 1.0/2 * e**3 * sin(M) * (3*cos(M)**2 - 1)
-            E = M + e*sin(M) + Edash + Edashdash
-            return E
+            EccAnom = M + e*sin(M) + Edash + Edashdash
+            return EccAnom
         EccAnom = E0 - (E0 - e*sin(E0) - M)/(1-e*cos(E0))
-        Ed = abs(EccAnom-E0)
+        E_error = abs(EccAnom-E0)
         E0 = EccAnom
         i += 1
+
     return EccAnom
 
 
-def calcTA(sat, M):
+def calcTA(sat, MeanAnomaly):
     # This returns TrueAnomaly in radians
     e = sat['ECCENTRICITY']
-
-    EccAnom = calcEA(sat, M)
+    EccAnom = calcEA(sat, MeanAnomaly)
     x = sqrt(1-e)*cos(EccAnom/2)
     y = sqrt(1+e)*sin(EccAnom/2)
     TrueAnomaly = 2*atan2(y, x)
+
     return TrueAnomaly
 
 
@@ -223,22 +230,23 @@ def calcSMA(sat):
     # mu is in km^3/day^2, gravitational coefficient
     mu = 2.97554e15
     SemiMajorAxis = (mu/(2*pi*n)**2)**(1.0/3)
+
     return SemiMajorAxis
 
 
 def calcPerigee(sat, SemiMajorAxis):
     # Returns distance from earth center in km
     e = sat['ECCENTRICITY']
-
     perigee = SemiMajorAxis*(1-e)
+
     return perigee
 
 
 def geoDist(sat, perigee, TrueAnomaly):
     # Inputs: satellite data, perigee(km), true anomaly(rad)
     e = sat['ECCENTRICITY']
-
     r = (perigee*(1+e))/(1+e*cos(TrueAnomaly))
+
     return r
 
 
@@ -316,7 +324,7 @@ def calcGeocentricRADec(RADiff, pRAAN, ArgLat, manual_t=0):
 
 def pol2cart(r, gcRA, gcDec):
     # Takes inputs in radians, returns in km
-    # Will give location of satellite in X Y Z
+    # Will give location of satellite in X Y Z geocentric
 
     Xg = r * cos(gcRA)*cos(gcDec)
     Yg = r * sin(gcRA)*cos(gcDec)
@@ -325,25 +333,26 @@ def pol2cart(r, gcRA, gcDec):
     return [Xg, Yg, Zg]
 
 
-def LLA2cart(recvLat, recvLong, h):
+def LLA2cart(obsvLLA):
+    obsvlat, obsvlong, height = obsvLLA
     # Lat long need to be in degrees, altitude in m
     # Converts lat/long into X Y Z coords in km
 
     a = 6378.137
     b = 6356.75231424518
     ecc = sqrt((a**2 - b**2)/a**2)
-    N = a/sqrt(1 - ecc**2 * sin(recvLat)**2)
-    X = (N + h) * cos(recvLat) * cos(recvLong)
-    Y = (N + h) * cos(recvLat) * sin(recvLong)
-    Z = (b**2/a**2 * N + h)*sin(recvLat)
+    N = a/sqrt(1 - ecc**2 * sin(obsvlat)**2)
+    X = (N + height) * cos(obsvlat) * cos(obsvlong)
+    Y = (N + height) * cos(obsvlat) * sin(obsvlong)
+    Z = (b**2/a**2 * N + height)*sin(obsvlat)
 
     return [X, Y, Z]
 
 
-def cart2RADec(satpos, obspos):
+def cart2RADec(satPos, obsvPos):
     # Returns in radians
-    xg, yg, zg = satpos
-    ag, bg, cg = obspos
+    xg, yg, zg = satPos
+    ag, bg, cg = obsvPos
 
     xs = xg - ag
     ys = yg - bg
@@ -362,31 +371,34 @@ def cart2RADec(satpos, obspos):
     return [alpha, delta, r]
 
 
-def LLA2AzEl(satlat, satlong, obsvlat, obsvlong, satpos, obsvpos):
+def LLA2AzEl(satLLACoords, obsvLLA, satPos, obsvPos):
 
-    satlat = radians(satlat)
-    satlong = radians(satlong)
+    obsvLat, obsvLong, height = obsvLLA
+    satLat, satLong = satLLACoords
+    satLat = radians(satLat)
+    satLong = radians(satLong)
 
-    dlong = satlong - obsvlong
-    azimuth = atan2(sin(dlong)*cos(satlat), cos(obsvlat)*sin(satlat) - sin(obsvlat)*cos(satlat)*cos(dlong))
+    dlong = satLong - obsvLong
+    arg1 = sin(dlong)*cos(satLat)
+    arg2 = cos(obsvLat)*sin(satLat) - sin(obsvLat)*cos(satLat)*cos(dlong)
+    azimuth = atan2(arg1, arg2)
     azimuth = (azimuth + 2 * pi) % (2*pi)
-    
-    xd, yd, zd = satpos
-    x, y, z = obsvpos
+
+    xd, yd, zd = satPos
+    x, y, z = obsvPos
 
     dx = xd - x
     dy = yd - y
     dz = zd - z
 
-    elevation = pi/2.0 - acos((x*dx + y*dy + z*dz) / sqrt((x**2+y**2+z**2)*(dx**2+dy**2+dz**2)))
+    magnitude = sqrt((x**2+y**2+z**2)*(dx**2+dy**2+dz**2))
+    elevation = pi/2.0 - acos((x*dx + y*dy + z*dz) / magnitude)
 
     return [azimuth, elevation]
 
 
 def ECEF2LLA(pos):
-    X = pos[0]
-    Y = pos[1]
-    Z = pos[2]
+    X, Y, Z = pos
 
     r = sqrt(X**2 + Y**2 + Z**2)
     p = sqrt(X**2 + Y**2)
@@ -419,45 +431,46 @@ def ECEF2LLA(pos):
         lati = latnext
         i += 1
 
+    # Bring our longitude back within 0:2pi
     while(long > pi):
         long -= 2*pi
     while(long < -pi):
         long += 2*pi
-    
+
     return [degrees(lati), degrees(long)]
 
 
-def TLE2LLA(sat, obsvLLA, manual_t=0):
+def TLE2coords(sat, obsvLLA, manual_t=0):
     # Calculate all the things
+    # Takes a TLE and observer LLA,
+    # Calculates XYZ of satellite and observer
+    # And LLA of satellite
+
     t = epochDiff(sat) + manual_t/86400.0
-    M = calcMA(sat, t)
+    MeanAnomaly = calcMA(sat, t)
     SemiMajorAxis = calcSMA(sat)
-    TrueAnomaly = calcTA(sat, M)
+    TrueAnomaly = calcTA(sat, MeanAnomaly)
     perigee = calcPerigee(sat, SemiMajorAxis)
+
     pRAAN, pAP = precession(sat, SemiMajorAxis, t)
     ArgLat = calcArgLat(TrueAnomaly, pAP)
     RADiff = calcRADiff(sat, ArgLat)
     r = geoDist(sat, perigee, TrueAnomaly)
     gcRA, gcDec = calcGeocentricRADec(RADiff, pRAAN, ArgLat)
-    cartcoords = pol2cart(r, gcRA, gcDec)
-    obsvlat, obsvlong, height = obsvLLA
-
-    obsvcoords = LLA2cart(obsvlat, obsvlong, height)
-
-    alpha, delta, rg = cart2RADec(cartcoords, obsvcoords)
-    LLAcoords = ECEF2LLA(cartcoords)
-    satlat, satlong = LLAcoords
-    azimuth, elevation = LLA2AzEl(satlat, satlong, obsvlat, obsvlong, cartcoords, obsvcoords)
-
-    return [LLAcoords, azimuth, elevation, cartcoords]
-
-
-def returnAzEl(TLE,satname, obsvLLA):
     
-    sat = TLE[satname]
+    cartCoords = pol2cart(r, gcRA, gcDec)
+    obsvCoords = LLA2cart(obsvLLA)
+    satLLACoords = ECEF2LLA(cartCoords)
+    
 
-    output = TLE2LLA(sat, obsvLLA)
-    satlat, satlong = output[0]
-    az = degrees(output[1])
-    el = degrees(output[2])
-    return [az, el]
+    return [satLLACoords, cartCoords, obsvCoords]
+
+
+def getAzEl(TLE, satName, obsvLLA):
+
+    sat = TLE[satName]
+
+    satLLACoords, cartCoords, obsvCoords = TLE2coords(sat, obsvLLA)
+    azimuth, elevation = LLA2AzEl(satLLACoords, obsvLLA, cartCoords, obsvCoords)
+
+    return [degrees(azimuth), degrees(elevation)]
