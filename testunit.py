@@ -2,7 +2,7 @@ from math import radians
 from time import sleep
 import satTLE
 
-
+# Lat (deg) long (deg) height (m)
 obsvLLA = [radians(-37.78661), radians(144.96849), 100]
 satname = 'ISS (ZARYA)'
 TLE = satTLE.loadTLE()
