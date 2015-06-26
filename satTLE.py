@@ -98,27 +98,27 @@ def loadTLE():
             TLEfile.close()
 
             if raw_input('TLE\'s old, fetch new? (y/n) ').lower() == 'y':
-                print('Current TLE older than 3 days, downloading new')
+                #print('Current TLE older than 3 days, downloading new')
                 TLE = downloadTLE()
 
                 return TLE
 
             else:
-                print('Using cached TLE: ' + str(lines[0]))
+                #print('Using cached TLE: ' + str(lines[0]))
                 TLE.update(interpretTLE(lines[1:]))
 
                 return TLE
 
         else:
             # TLE within date so parse them
-            print('Using cached TLE: ' + str(lines[0]))
+            #print('Using cached TLE: ' + str(lines[0]))
             TLE.update(interpretTLE(lines[1:]))
 
             return TLE
 
     except IOError:
         # No TLE file exists
-        print('Cannot find TLE.txt, downloading TLE')
+        #print('Cannot find TLE.txt, downloading TLE')
         TLE = downloadTLE()
 
         return TLE
@@ -139,7 +139,7 @@ def interpretTLE(data):
 
         TLE[sat_name] = {'CATALOGNUM': line1[1],
                          'EPOCHTIME': float(line1[3]),
-                         'DECAY': float(line1[4]),
+                         'DECAY': line1[4],# FIX used to be float but new data seems to have - in it
                          'INCLINATION': float(line2[2]),
                          'RAAN': float(line2[3]),
                          'ECCENTRICITY': float(line2[4])/10000000.0,
