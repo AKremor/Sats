@@ -222,7 +222,7 @@ def ECEF2LLA(pos):
     i = 0
 
     while(error > 0.0000001):
-        if(i > 500):
+        if(i > 50):
             lati = atan(Z/sqrt(X**2 + Y**2))
 
             while(long > pi):
