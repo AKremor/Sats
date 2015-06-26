@@ -3,7 +3,8 @@ from math import (floor, pi, radians, degrees, sin, cos,
                   acos, sqrt, copysign, atan, asin, atan2)
 import requests
 import sys
-
+import time
+import pickle
 
 def ymd2jd(year, month, day):
     # need to find the source for this
@@ -48,9 +49,7 @@ def utcDatetime2gmst(datetimeObj):
 
     UT = (hour + minute + second + microsecond) * 1.002737909
     T0 += UT
-
-    GST = T0 % 24
-    GST = GST * 15
+    GST = (T0 % 24) * 15
 
     return GST
 
@@ -68,60 +67,39 @@ def downloadTLE():
         sys.exit(1)
 
     URLlist = siteList.read().splitlines()
+    with open('TLE.pickle', 'wb') as handle:
+        for URL in URLlist:
+            print('Downloading from ' + URL)
+            response = requests.get(URL)
+            data = response.content
+            TLE.update(interpretTLE(data))
 
-    TLEfile = open('TLE.txt', 'w')
-    TLEfile.write(datetime.utcnow().strftime("%Y %m %d %H:%M") + '\n')
-
-    for URL in URLlist:
-        print('Downloading from ' + URL)
-        response = requests.get(URL)
-        data = response.content
-        TLEfile.write(data)
-        TLE.update(interpretTLE(data))
-
-    return TLE
+        # Now add a timestamp
+        TLE.update({'TIMESTAMP': datetime.utcnow().strftime("%Y %m %d %H:%M")})
+        pickle.dump(TLE, handle)
 
 
 def loadTLE():
     # Check if we have a TLE file that is recent, or download
     # a new one.
 
-    TLE = {}
     try:
-
-        TLEfile = open('TLE.txt', 'r')
-        lines = TLEfile.readlines()
-        TLE_time = datetime.strptime(lines[0].rstrip(), "%Y %m %d %H:%M")
-
-        if (datetime.utcnow() - TLE_time) > timedelta(days=3):
-            # TLE out of date so download new ones
-            TLEfile.close()
-
-            if raw_input('TLE\'s old, fetch new? (y/n) ').lower() == 'y':
-                #print('Current TLE older than 3 days, downloading new')
-                TLE = downloadTLE()
-
-                return TLE
-
-            else:
-                #print('Using cached TLE: ' + str(lines[0]))
-                TLE.update(interpretTLE(lines[1:]))
-
-                return TLE
-
-        else:
-            # TLE within date so parse them
-            #print('Using cached TLE: ' + str(lines[0]))
-            TLE.update(interpretTLE(lines[1:]))
-
-            return TLE
-
+        handle = open('TLE.pickle', 'rb')
     except IOError:
-        # No TLE file exists
-        #print('Cannot find TLE.txt, downloading TLE')
-        TLE = downloadTLE()
+        # TLE file missing, create it
+        downloadTLE()
 
-        return TLE
+    handle = open('TLE.pickle', 'rb')
+    # Depickle
+    TLE = pickle.load(handle)
+
+    if (datetime.utcnow() - datetime.strptime(TLE['TIMESTAMP'], '%Y %m %d %H:%M')) > timedelta(days=3):
+        # Pickle is too old
+        handle.close()
+        downloadTLE()
+
+    with open('TLE.pickle', 'rb') as handle:
+        return pickle.load(handle)
 
 
 def interpretTLE(data):
@@ -151,184 +129,13 @@ def interpretTLE(data):
     return TLE
 
 
-def epochDiff(sat):
-    # Calculate difference between current time and the
-    # time the TLE was set (epoch) in solar days
-
-    epoch = str(sat['EPOCHTIME'])
-    epochYear = int('20'+epoch[:2])
-    epochDays = float(epoch[2:])
-
-    date_days = int(epochDays)
-    date_hours = floor((epochDays - date_days)*24)
-    date_min = (epochDays - date_days - date_hours/24)*1440
-    date_sec = (epochDays - date_days - date_hours/24 - date_min/1440)*86400
-
-    epochYear = str(epochYear)
-    days = str(date_days)
-    hours = str(int(date_hours))
-    min = str(int(date_min))
-    sec = str(int(date_sec))
-    date_epoch = epochYear + ' ' + days + ' ' + hours + ' ' + min + ' ' + sec
-
-    epoch_time = datetime.strptime(date_epoch, "%Y %j %H %M %S")
-
-    curr_time = datetime.utcnow()
-    # Time delta between now and epoch is therefore, in seconds
-    timedelta = (curr_time - epoch_time)
-
-    return timedelta.total_seconds()/86400
-
-
-def calcMA(sat, t):
-    # Returns a mean anomaly between 0:2*pi
-    M0 = sat['MNANOM']
-    n = sat['MNMOTION']
-    Mt = M0 + 360*(n*t - int(n*t) - int((M0 + 360*(n*t - int(n*t)))/(360)))
-
-    return radians(Mt)
-
-
-def calcEA(sat, M):
-    # I think this returns it in radians, seems consistent at least
-    E0 = sat['MNANOM']
-    e = sat['ECCENTRICITY']
-
-    # Our error term
-    E_error = 100000000
-    i = 0
-    while(E_error > 0.000000001):
-        if i > 50:
-            # If we aren't converging go for a best guess
-            Edash = e**2 * sin(M)*cos(M)
-            Edashdash = 1.0/2 * e**3 * sin(M) * (3*cos(M)**2 - 1)
-            EccAnom = M + e*sin(M) + Edash + Edashdash
-            return EccAnom
-        EccAnom = E0 - (E0 - e*sin(E0) - M)/(1-e*cos(E0))
-        E_error = abs(EccAnom-E0)
-        E0 = EccAnom
-        i += 1
-
-    return EccAnom
-
-
-def calcTA(sat, MeanAnomaly):
-    # This returns TrueAnomaly in radians
-    e = sat['ECCENTRICITY']
-    EccAnom = calcEA(sat, MeanAnomaly)
-    x = sqrt(1-e)*cos(EccAnom/2)
-    y = sqrt(1+e)*sin(EccAnom/2)
-    TrueAnomaly = 2*atan2(y, x)
-
-    return TrueAnomaly
-
-
-def calcSMA(sat):
-    # Returns distance from earth center in km
-
-    n = sat['MNMOTION']
-    # mu is in km^3/day^2, gravitational coefficient
-    mu = 2.97554e15
-    SemiMajorAxis = (mu/(2*pi*n)**2)**(1.0/3)
-
-    return SemiMajorAxis
-
-
-def calcPerigee(sat, SemiMajorAxis):
-    # Returns distance from earth center in km
-    e = sat['ECCENTRICITY']
-    perigee = SemiMajorAxis*(1-e)
-
-    return perigee
-
-
-def geoDist(sat, perigee, TrueAnomaly):
-    # Inputs: satellite data, perigee(km), true anomaly(rad)
-    e = sat['ECCENTRICITY']
-    r = (perigee*(1+e))/(1+e*cos(TrueAnomaly))
-
-    return r
-
-
-def precession(sat, SemiMajorAxis, t):
-    # Returns in radians
-    # i = radians
-    # n,e,RAAN,AP,SemiMajorAxis are in their standard units from sat
-
-    n = sat['MNMOTION']
-    e = sat['ECCENTRICITY']
-    i = radians(sat['INCLINATION'])
-    RAAN = sat['RAAN']
-    AP = sat['ARGPERIGEE']
-
-    # Radius of earth in km
-    Re = 6378.135
-    aE = Re
-    a1 = SemiMajorAxis/Re
-    # Second gravity harmonic, J2 Propagation
-    J2 = 0.0010826267
-
-    k2 = 1/2.0 * J2 * aE**2
-    d1 = 3/2.0 * k2/SemiMajorAxis**2 * (3*cos(i)**2 - 1)/((1-e**2)**(1.0/3))
-
-    a0 = a1*(1 - d1/3.0 - d1**2 - 134/81.0 * d1**3)
-    p0 = a0 * (1-e**2)
-    a0 = Re * a0
-    p0 = Re * p0
-
-    # Precession of the RAAN
-    # del_pRAAN will be in decimal degrees
-    del_pRAAN = 360*(-3*J2*Re**2*n*t*cos(i)/(2*p0**2))
-    pRAAN = RAAN + del_pRAAN
-
-    # Precession of arg perigee
-    # del_pAP will be in decimal degrees
-    del_pAP = 360*(3*J2*Re**2*n*t*(5*cos(i)**2 - 1)/(4*p0**2))
-    pAP = AP + del_pAP
-
-    return [radians(pRAAN), radians(pAP)]
-
-
-def calcArgLat(TrueAnomaly, pAP):
-    # Inputs should be in radians, returns in radians
-    Lat = pAP + TrueAnomaly - 2*pi*(int((pAP + TrueAnomaly)/(2*pi)))
-
-    return Lat
-
-
-def calcRADiff(sat, ArgLat):
-    # ArgLat should be in radians, Returns in radians
-    i = radians(sat['INCLINATION'])
-
-    if(0 < i < pi/2 and 0 < ArgLat < pi):
-        RADiff = acos(cos(ArgLat)/sqrt(1-sin(i)**2 * sin(ArgLat)**2))
-    elif(pi/2 < i < pi and pi < ArgLat < 2*pi):
-        RADiff = acos(cos(ArgLat)/sqrt(1-sin(i)**2 * sin(ArgLat)**2))
-    else:
-        RADiff = 2*pi - acos(cos(ArgLat)/sqrt(1-sin(i)**2 * sin(ArgLat)**2))
-
-    return RADiff
-
-
-def calcGeocentricRADec(RADiff, pRAAN, ArgLat, manual_t=0):
-    # Partially working, now accounts for rotation of earth
-    # Inputs should be in radians, returns in radians
-    GMST = utcDatetime2gmst(datetime.utcnow())*86400.0/86164.0
-    earthrot = radians(GMST + manual_t*360.0)
-    gcRA = -earthrot + RADiff + pRAAN - 2*pi*(int((RADiff + pRAAN)/(2*pi)))
-
-    gcDec = (copysign(1, sin(ArgLat))) * acos(cos(ArgLat)/cos(RADiff))
-
-    return [gcRA, gcDec]
-
-
-def pol2cart(r, gcRA, gcDec):
+def pol2cart(r, geocentricRA, geocentricDec):
     # Takes inputs in radians, returns in km
     # Will give location of satellite in X Y Z geocentric
 
-    Xg = r * cos(gcRA)*cos(gcDec)
-    Yg = r * sin(gcRA)*cos(gcDec)
-    Zg = r * sin(gcDec)
+    Xg = r * cos(geocentricRA)*cos(geocentricDec)
+    Yg = r * sin(geocentricRA)*cos(geocentricDec)
+    Zg = r * sin(geocentricDec)
 
     return [Xg, Yg, Zg]
 
@@ -415,7 +222,7 @@ def ECEF2LLA(pos):
     i = 0
 
     while(error > 0.0000001):
-        if(i > 50):
+        if(i > 500):
             lati = atan(Z/sqrt(X**2 + Y**2))
 
             while(long > pi):
@@ -440,37 +247,198 @@ def ECEF2LLA(pos):
     return [degrees(lati), degrees(long)]
 
 
-def TLE2coords(sat, obsvLLA, manual_t=0):
-    # Calculate all the things
-    # Takes a TLE and observer LLA,
-    # Calculates XYZ of satellite and observer
-    # And LLA of satellite
-
-    t = epochDiff(sat) + manual_t/86400.0
-    MeanAnomaly = calcMA(sat, t)
-    SemiMajorAxis = calcSMA(sat)
-    TrueAnomaly = calcTA(sat, MeanAnomaly)
-    perigee = calcPerigee(sat, SemiMajorAxis)
-
-    pRAAN, pAP = precession(sat, SemiMajorAxis, t)
-    ArgLat = calcArgLat(TrueAnomaly, pAP)
-    RADiff = calcRADiff(sat, ArgLat)
-    r = geoDist(sat, perigee, TrueAnomaly)
-    gcRA, gcDec = calcGeocentricRADec(RADiff, pRAAN, ArgLat)
-    
-    cartCoords = pol2cart(r, gcRA, gcDec)
-    obsvCoords = LLA2cart(obsvLLA)
-    satLLACoords = ECEF2LLA(cartCoords)
-    
-
-    return [satLLACoords, cartCoords, obsvCoords]
-
-
 def getAzEl(TLE, satName, obsvLLA):
 
     sat = TLE[satName]
-
+    # FIXASA obsvCoords = LLA2cart(obsvLLA)
     satLLACoords, cartCoords, obsvCoords = TLE2coords(sat, obsvLLA)
     azimuth, elevation = LLA2AzEl(satLLACoords, obsvLLA, cartCoords, obsvCoords)
 
     return [degrees(azimuth), degrees(elevation)]
+
+
+class Satellite(object):
+
+    def __init__(self, name, satelliteTLE):
+        self.name = name
+        self.catalogNumber = satelliteTLE['CATALOGNUM']
+        self.epoch = satelliteTLE['EPOCHTIME']
+        self.decay = satelliteTLE['DECAY']
+        self.inclination = satelliteTLE['INCLINATION']
+        self.RAAN = satelliteTLE['RAAN']
+        self.eccentricity = satelliteTLE['ECCENTRICITY']
+        self.argPerigee = satelliteTLE['ARGPERIGEE']
+        self.meanAnomaly = satelliteTLE['MNANOM']
+        self.meanMotion = satelliteTLE['MNMOTION']
+        self.orbitNumber = satelliteTLE['ORBITNUM']
+        self.SemiMajorAxis = self.calcSemiMajorAxis()
+        self.perigee = self.calcPerigee()
+
+    def runCalcs(self, manualTime=0):
+        self.time = self.epochDiff() + manualTime/86400.0
+        self.meanAnomaly_t = self.calcMeanAnomaly(self.time)
+        self.eccAnom = self.calcEA()
+        self.trueAnomaly = self.calcTrueAnomaly()
+        self.geocentricDistance = self.calcGeocentricDistance()
+        self.pRAAN, self.pAP = self.calcPrecession(self.time)
+        self.argLatitude = self.calcArgLat()
+        self.RADiff = self.calcRADiff()
+        self.geocentricRA, self.geocentricDec = self.calcGeocentricRADec(manualTime)
+
+    def calcSemiMajorAxis(self):
+        # Returns distance from earth center in km
+        # mu is in km^3/day^2, gravitational coefficient
+        mu = 2.97554e15
+        return (mu/(2*pi*self.meanMotion)**2)**(1.0/3)
+
+    def calcPerigee(self):
+        # Returns distance from earth center in km
+        return self.SemiMajorAxis*(1-self.eccentricity)
+
+    def calcMeanAnomaly(self, timeDelta):
+        # Returns a mean anomaly between 0:2*pi
+        M_0 = self.meanAnomaly
+        n = self.meanMotion
+        t = timeDelta
+        M_t = M_0 + 360*(n*t - int(n*t) - int((M_0 + 360*(n*t - int(n*t)))/360))
+
+        return radians(M_t)
+
+    def calcEA(self):
+        # I think this returns it in radians, seems consistent at least
+        E0 = self.meanAnomaly
+        e = self.eccentricity
+        M = self.meanAnomaly_t
+        # Our error term
+        E_error = 100000000
+        i = 0
+        while(E_error > 0.000000001):
+            if i > 50:
+                # If we aren't converging go for a best guess
+                Edash = e**2 * sin(M)*cos(M)
+                Edashdash = 1.0/2 * e**3 * sin(M) * (3*cos(M)**2 - 1)
+                EccAnom = M + e*sin(M) + Edash + Edashdash
+                return EccAnom
+            EccAnom = E0 - (E0 - e*sin(E0) - M)/(1-e*cos(E0))
+            E_error = abs(EccAnom-E0)
+            E0 = EccAnom
+            i += 1
+
+        return EccAnom
+
+    def calcTrueAnomaly(self):
+        # This returns TrueAnomaly in radians
+        e = self.eccentricity
+        x = sqrt(1-e)*cos(self.eccAnom/2)
+        y = sqrt(1+e)*sin(self.eccAnom/2)
+        TrueAnomaly = 2*atan2(y, x)
+
+        return TrueAnomaly
+
+    def calcGeocentricDistance(self):
+        # Inputs: satellite data, perigee(km), true anomaly(rad)
+        e = self.eccentricity
+        geocentricDistance = (self.perigee*(1+e))/(1+e*cos(self.trueAnomaly))
+
+        return geocentricDistance
+
+    def calcArgLat(self):
+        # Inputs should be in radians, returns in radians
+        lat = self.pAP + self.trueAnomaly - 2*pi*(int((self.pAP + self.trueAnomaly)/(2*pi)))
+
+        return lat
+
+    def calcPrecession(self, timeDelta):
+        # Returns in radians
+        # i = radians
+        # n,e,RAAN,AP,SemiMajorAxis are in their standard units from sat
+
+        n = self.meanMotion
+        e = self.eccentricity
+        i = radians(self.inclination)
+        RAAN = self.RAAN
+        AP = self.argPerigee
+
+        # Radius of earth in km
+        Re = 6378.135
+        aE = Re
+        a1 = self.SemiMajorAxis/Re
+        # Second gravity harmonic, J2 Propagation
+        J2 = 0.0010826267
+
+        k2 = 1/2.0 * J2 * aE**2
+        d1 = 3/2.0 * k2/self.SemiMajorAxis**2 * (3*cos(i)**2 - 1)/((1-e**2)**(1.0/3))
+
+        a0 = Re * a1 *(1 - d1/3.0 - d1**2 - 134/81.0 * d1**3)
+        p0 =  Re * a0 * (1-e**2)
+
+        # Precession of the RAAN
+        # del_pRAAN will be in decimal degrees
+        del_pRAAN = 360*(-3*J2*Re**2*n*timeDelta*cos(i)/(2*p0**2))
+        pRAAN = RAAN + del_pRAAN
+
+        # Precession of arg perigee
+        # del_pAP will be in decimal degrees
+        del_pAP = 360*(3*J2*Re**2*n*timeDelta*(5*cos(i)**2 - 1)/(4*p0**2))
+        pAP = AP + del_pAP
+
+        return [radians(pRAAN), radians(pAP)]
+
+    def calcRADiff(self):
+        # ArgLat should be in radians, Returns in radians
+        i = radians(self.inclination)
+
+        if 0 < i < pi/2 and 0 < self.argLatitude < pi:
+            return acos(cos(self.argLatitude)/sqrt(1-sin(i)**2 * sin(self.argLatitude)**2))
+        elif pi/2 < i < pi and pi < self.argLatitude < 2*pi:
+            return acos(cos(self.argLatitude)/sqrt(1-sin(i)**2 * sin(self.argLatitude)**2))
+        return 2*pi - acos(cos(self.argLatitude)/sqrt(1-sin(i)**2 * sin(self.argLatitude)**2))
+
+    def calcGeocentricRADec(self, manual_t=0):
+        # Partially working, now accounts for rotation of earth
+        # Inputs should be in radians, returns in radians
+        GMST = utcDatetime2gmst(datetime.utcnow())*86400.0/86164.0
+        earthRotation = radians(GMST + manual_t*360.0)
+        geocentricRA = -earthRotation + self.RADiff + self.pRAAN - 2*pi*(int((self.RADiff + self.pRAAN)/(2*pi)))
+
+        geocentricDec = (copysign(1, sin(self.argLatitude))) * acos(cos(self.argLatitude)/cos(self.RADiff))
+
+        return [geocentricRA, geocentricDec]
+
+    def epochDiff(self):
+        # Calculate difference between current time and the
+        # time the TLE was set (epoch) in solar days
+
+        # Need to rebuild this FIX
+        epoch = str(self.epoch)
+        epochYear = int('20'+epoch[:2])
+        epochDays = float(epoch[2:])
+
+        date_days = int(epochDays)
+        date_hours = floor((epochDays - date_days)*24)
+        date_min = (epochDays - date_days - date_hours/24)*1440
+        date_sec = (epochDays - date_days - date_hours/24 - date_min/1440)*86400
+
+        epochYear = str(epochYear)
+        days = str(date_days)
+        hours = str(int(date_hours))
+        min = str(int(date_min))
+        sec = str(int(date_sec))
+        date_epoch = epochYear + ' ' + days + ' ' + hours + ' ' + min + ' ' + sec
+
+        epoch_time = datetime.strptime(date_epoch, "%Y %j %H %M %S")
+
+        curr_time = datetime.utcnow()
+        # Time delta between now and epoch is therefore, in seconds
+        timedelta = (curr_time - epoch_time)
+
+        return timedelta.total_seconds()/86400
+
+    def LLAcoordinates(self, manualTime):
+        # Takes a TLE and calculates XYZ, LLA of satellite
+        self.runCalcs(manualTime) # Ensure everything is up to date
+
+        cartesianCoords = pol2cart(self.geocentricDistance, self.geocentricRA, self.geocentricDec)
+        LLACoords = ECEF2LLA(cartesianCoords)
+
+        return [LLACoords, cartesianCoords]
