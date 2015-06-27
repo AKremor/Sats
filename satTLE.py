@@ -252,7 +252,8 @@ def ECEF2LLA(pos):
     while(longitude < -pi):
         longitude += 2*pi
 
-    return [degrees(latitude), degrees(longitude)]
+    return {'latitude' : degrees(latitude),
+            'longitude' : degrees(longitude)}
 
 
 def getAzEl(TLE, satName, obsvLLA):
@@ -448,13 +449,3 @@ class Satellite(object):
         LLACoords = ECEF2LLA(cartesianCoords)
 
         return [LLACoords, cartesianCoords]
-
-
-# Testing
-# make a new satellite
-TLE = loadTLE()
-ISS = Satellite('ISS', TLE['ISS (ZARYA)'])
-
-while True:
-    print ISS.LLAcoordinates(0)[0]
-    time.sleep(2)

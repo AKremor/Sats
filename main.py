@@ -4,11 +4,12 @@ print
 
 __author__ = 'Anthony'
 import satTLE
-import cgi
 import json
 
-formData = cgi.FieldStorage()
-if formData['calling'].value == 'getSatellites':
-    satelliteList = satTLE.loadTLE()
-    names = dict((key, value) for (key, value) in satelliteList)
-    print json.dumps(names)
+
+# Testing
+# make a new satellite
+TLE = satTLE.loadTLE()
+ISS = satTLE.Satellite('ISS', TLE['ISS (ZARYA)'])
+
+print json.dumps(ISS.LLAcoordinates(0)[0])
