@@ -1,13 +1,15 @@
 from datetime import datetime, timedelta
-from math import (floor, pi, radians, degrees, sin, cos,
+from math import (pi, radians, degrees, sin, cos,
                   acos, sqrt, copysign, atan, asin, atan2)
-import requests
-import sys
-import time
+import os
 import pickle
+import requests
+import time
+import sys
+
 
 def ymd2jd(year, month, day):
-    # need to find the source for this
+    # Sourced from SDSSpy at https://code.google.com/p/sdsspy/
     if month == 1 or month == 2:
         yprime = year - 1
         mprime = month + 12
@@ -32,7 +34,7 @@ def ymd2jd(year, month, day):
 
 
 def utcDatetime2gmst(datetimeObj):
-    # need to find the source for this
+    # Sourced from SDSSpy at https://code.google.com/p/sdsspy/
     # Returns GMST in degrees
     jd = ymd2jd(datetimeObj.year, datetimeObj.month, datetimeObj.day)
 
@@ -70,9 +72,14 @@ def downloadTLE():
     with open('TLE.pickle', 'wb') as handle:
         for URL in URLlist:
             print('Downloading from ' + URL)
-            response = requests.get(URL)
-            data = response.content
-            TLE.update(interpretTLE(data))
+            try:
+                response = requests.get(URL)
+                data = response.content
+                TLE.update(interpretTLE(data))
+            except:  # FIX identify what needs to be except
+                print 'Could not get data from ' + URL
+                os.remove('TLE.pickle')
+                sys.exit(1)
 
         # Now add a timestamp
         TLE.update({'TIMESTAMP': datetime.utcnow().strftime("%Y %m %d %H:%M")})
@@ -93,7 +100,8 @@ def loadTLE():
     # Depickle
     TLE = pickle.load(handle)
 
-    if (datetime.utcnow() - datetime.strptime(TLE['TIMESTAMP'], '%Y %m %d %H:%M')) > timedelta(days=3):
+    time_stamp = datetime.strptime(TLE['TIMESTAMP'], '%Y %m %d %H:%M')
+    if (datetime.utcnow() - time_stamp) > timedelta(days=3):
         # Pickle is too old
         handle.close()
         downloadTLE()
@@ -116,8 +124,8 @@ def interpretTLE(data):
         line2 = data[i+2].split()
 
         TLE[sat_name] = {'CATALOGNUM': line1[1],
-                         'EPOCHTIME': float(line1[3]),
-                         'DECAY': line1[4],# FIX used to be float but new data seems to have - in it
+                         'EPOCHTIME': line1[3],
+                         'DECAY': line1[4],  # FIX used to be float but new data seems to have - in it
                          'INCLINATION': float(line2[2]),
                          'RAAN': float(line2[3]),
                          'ECCENTRICITY': float(line2[4])/10000000.0,
@@ -211,8 +219,8 @@ def ECEF2LLA(pos):
     p = sqrt(X**2 + Y**2)
 
     # First calculate geocentric lat
-    lati = atan2(p, Z)
-    long = atan2(Y, X)
+    latitude = atan2(p, Z)
+    longitude = atan2(Y, X)
 
     error = 1111
     # Earth radius at equator and poles, metres
@@ -223,38 +231,47 @@ def ECEF2LLA(pos):
 
     while(error > 0.0000001):
         if(i > 50):
-            lati = atan(Z/sqrt(X**2 + Y**2))
+            latitude = atan(Z/sqrt(X**2 + Y**2))
 
-            while(long > pi):
-                long -= 2*pi
-            while(long < -pi):
-                long += 2*pi
-            return [degrees(lati), degrees(long)]
+            while(longitude > pi):
+                longitude -= 2*pi
+            while(longitude < -pi):
+                longitude += 2*pi
+            return [degrees(latitude), degrees(longitude)]
 
-        Rn = a/((1-(e**2)*(sin(lati)**2)))
-        h = p/cos(lati) - Rn*lati
-        latnext = atan(Z/p * ((1-(e**2) * Rn/(Rn + h)))**-1)
-        error = abs(lati - latnext)
-        lati = latnext
+        Rn = a/((1-(e**2)*(sin(latitude)**2)))
+        h = p/cos(latitude) - Rn*latitude
+        latitude_next = atan(Z/p * ((1-(e**2) * Rn/(Rn + h)))**-1)
+        error = abs(latitude - latitude_next)
+        latitude = latitude_next
         i += 1
 
     # Bring our longitude back within 0:2pi
-    while(long > pi):
-        long -= 2*pi
-    while(long < -pi):
-        long += 2*pi
+    while(longitude > pi):
+        longitude -= 2*pi
+    while(longitude < -pi):
+        longitude += 2*pi
 
-    return [degrees(lati), degrees(long)]
+    return [degrees(latitude), degrees(longitude)]
 
 
 def getAzEl(TLE, satName, obsvLLA):
 
     sat = TLE[satName]
     # FIXASA obsvCoords = LLA2cart(obsvLLA)
-    satLLACoords, cartCoords, obsvCoords = TLE2coords(sat, obsvLLA)
-    azimuth, elevation = LLA2AzEl(satLLACoords, obsvLLA, cartCoords, obsvCoords)
+    satLLA, cartCoords, obsvCoords = TLE2coords(sat, obsvLLA)
+    azimuth, elevation = LLA2AzEl(satLLA, obsvLLA, cartCoords, obsvCoords)
 
     return [degrees(azimuth), degrees(elevation)]
+
+
+class Observer(object):
+
+    def __init__(self, name, latitude, longitude, altitude):
+        self.name = name
+        self.latitude = latitude
+        self.longitude = longitude
+        self.altitude = altitude
 
 
 class Satellite(object):
@@ -274,8 +291,8 @@ class Satellite(object):
         self.SemiMajorAxis = self.calcSemiMajorAxis()
         self.perigee = self.calcPerigee()
 
-    def runCalcs(self, manualTime=0):
-        self.time = self.epochDiff() + manualTime/86400.0
+    def runCalcs(self, manual_time=0):
+        self.time = self.epoch_difference() + manual_time/86400.0
         self.meanAnomaly_t = self.calcMeanAnomaly(self.time)
         self.eccAnom = self.calcEA()
         self.trueAnomaly = self.calcTrueAnomaly()
@@ -283,7 +300,7 @@ class Satellite(object):
         self.pRAAN, self.pAP = self.calcPrecession(self.time)
         self.argLatitude = self.calcArgLat()
         self.RADiff = self.calcRADiff()
-        self.geocentricRA, self.geocentricDec = self.calcGeocentricRADec(manualTime)
+        self.geocentricRA, self.geocentricDec = self.calcGeocentricRADec(manual_time)
 
     def calcSemiMajorAxis(self):
         # Returns distance from earth center in km
@@ -344,8 +361,8 @@ class Satellite(object):
 
     def calcArgLat(self):
         # Inputs should be in radians, returns in radians
-        lat = self.pAP + self.trueAnomaly - 2*pi*(int((self.pAP + self.trueAnomaly)/(2*pi)))
-
+        lat = self.pAP + self.trueAnomaly
+        lat -= 2*pi*(int((self.pAP + self.trueAnomaly)/(2*pi)))
         return lat
 
     def calcPrecession(self, timeDelta):
@@ -360,26 +377,27 @@ class Satellite(object):
         AP = self.argPerigee
 
         # Radius of earth in km
-        Re = 6378.135
-        aE = Re
-        a1 = self.SemiMajorAxis/Re
+        earth_radius = 6378.135
+        aE = earth_radius  # Oblateness of earth, we can pick better value here
+        a1 = self.SemiMajorAxis/earth_radius
         # Second gravity harmonic, J2 Propagation
         J2 = 0.0010826267
 
         k2 = 1/2.0 * J2 * aE**2
         d1 = 3/2.0 * k2/self.SemiMajorAxis**2 * (3*cos(i)**2 - 1)/((1-e**2)**(1.0/3))
 
-        a0 = Re * a1 *(1 - d1/3.0 - d1**2 - 134/81.0 * d1**3)
-        p0 =  Re * a0 * (1-e**2)
+        a0 = earth_radius * a1 * (1 - d1/3.0 - d1**2 - 134/81.0 * d1**3)
+        p0 = earth_radius * a0 * (1-e**2)
 
         # Precession of the RAAN
         # del_pRAAN will be in decimal degrees
-        del_pRAAN = 360*(-3*J2*Re**2*n*timeDelta*cos(i)/(2*p0**2))
+        del_pRAAN = 360*(-3*J2*earth_radius**2*n*timeDelta*cos(i)/(2*p0**2))
         pRAAN = RAAN + del_pRAAN
 
         # Precession of arg perigee
         # del_pAP will be in decimal degrees
-        del_pAP = 360*(3*J2*Re**2*n*timeDelta*(5*cos(i)**2 - 1)/(4*p0**2))
+        del_pAP = 3*J2*earth_radius**2*n*timeDelta*(5*cos(i)**2 - 1)/(4*p0**2)
+        del_pAP *= 360  # To degrees
         pAP = AP + del_pAP
 
         return [radians(pRAAN), radians(pAP)]
@@ -387,58 +405,56 @@ class Satellite(object):
     def calcRADiff(self):
         # ArgLat should be in radians, Returns in radians
         i = radians(self.inclination)
-
-        if 0 < i < pi/2 and 0 < self.argLatitude < pi:
-            return acos(cos(self.argLatitude)/sqrt(1-sin(i)**2 * sin(self.argLatitude)**2))
-        elif pi/2 < i < pi and pi < self.argLatitude < 2*pi:
-            return acos(cos(self.argLatitude)/sqrt(1-sin(i)**2 * sin(self.argLatitude)**2))
-        return 2*pi - acos(cos(self.argLatitude)/sqrt(1-sin(i)**2 * sin(self.argLatitude)**2))
+        AL = self.argLatitude
+        if 0 < i < pi/2 and 0 < AL < pi:
+            return acos(cos(AL)/sqrt(1-sin(i)**2 * sin(AL)**2))
+        elif pi/2 < i < pi and pi < AL < 2*pi:
+            return acos(cos(AL)/sqrt(1-sin(i)**2 * sin(AL)**2))
+        return 2*pi - acos(cos(AL)/sqrt(1-sin(i)**2 * sin(AL)**2))
 
     def calcGeocentricRADec(self, manual_t=0):
         # Partially working, now accounts for rotation of earth
         # Inputs should be in radians, returns in radians
         GMST = utcDatetime2gmst(datetime.utcnow())*86400.0/86164.0
-        earthRotation = radians(GMST + manual_t*360.0)
-        geocentricRA = -earthRotation + self.RADiff + self.pRAAN - 2*pi*(int((self.RADiff + self.pRAAN)/(2*pi)))
+        earth_rotation = radians(GMST + manual_t*360.0)
 
-        geocentricDec = (copysign(1, sin(self.argLatitude))) * acos(cos(self.argLatitude)/cos(self.RADiff))
+        RADiff = self.RADiff
+        pRAAN = self.pRAAN
+        AL = self.argLatitude
+        geocentricRA = -earth_rotation + RADiff + pRAAN
+        geocentricRA -= 2*pi*(int((RADiff + pRAAN)/(2*pi)))
+        geocentricDec = (copysign(1, sin(AL))) * acos(cos(AL)/cos(RADiff))
 
         return [geocentricRA, geocentricDec]
 
-    def epochDiff(self):
+    def epoch_difference(self):
         # Calculate difference between current time and the
-        # time the TLE was set (epoch) in solar days
+        # time the TLE was set (epoch) in solar days, epoch is a string
 
-        # Need to rebuild this FIX
-        epoch = str(self.epoch)
-        epochYear = int('20'+epoch[:2])
-        epochDays = float(epoch[2:])
+        year = datetime.strptime(self.epoch[0:2], '%y')
+        d = timedelta(days=float(self.epoch[2:]) - 1)  # Uses a 0 base
+        epoch_time = year + d
+        current_time = datetime.utcnow()
+        time_difference = current_time - epoch_time
 
-        date_days = int(epochDays)
-        date_hours = floor((epochDays - date_days)*24)
-        date_min = (epochDays - date_days - date_hours/24)*1440
-        date_sec = (epochDays - date_days - date_hours/24 - date_min/1440)*86400
-
-        epochYear = str(epochYear)
-        days = str(date_days)
-        hours = str(int(date_hours))
-        min = str(int(date_min))
-        sec = str(int(date_sec))
-        date_epoch = epochYear + ' ' + days + ' ' + hours + ' ' + min + ' ' + sec
-
-        epoch_time = datetime.strptime(date_epoch, "%Y %j %H %M %S")
-
-        curr_time = datetime.utcnow()
-        # Time delta between now and epoch is therefore, in seconds
-        timedelta = (curr_time - epoch_time)
-
-        return timedelta.total_seconds()/86400
+        return time_difference.total_seconds()/86400  # In fractional days
 
     def LLAcoordinates(self, manualTime):
         # Takes a TLE and calculates XYZ, LLA of satellite
-        self.runCalcs(manualTime) # Ensure everything is up to date
+        self.runCalcs(manualTime)  # Ensure everything is up to date
 
-        cartesianCoords = pol2cart(self.geocentricDistance, self.geocentricRA, self.geocentricDec)
+        cartesianCoords = pol2cart(self.geocentricDistance,
+                                   self.geocentricRA, self.geocentricDec)
         LLACoords = ECEF2LLA(cartesianCoords)
 
         return [LLACoords, cartesianCoords]
+
+
+# Testing
+# make a new satellite
+TLE = loadTLE()
+ISS = Satellite('ISS', TLE['ISS (ZARYA)'])
+
+while True:
+    print ISS.LLAcoordinates(0)[0]
+    time.sleep(2)
