@@ -64,4 +64,4 @@ function updateMarker() {
 }
 
 google.maps.event.addDomListener(window, 'load', initialize);
-setInterval(updateMarker, 2000); // Every 10 seconds we should update position
+setInterval(updateMarker, 10000); // Every 10 seconds we should update position

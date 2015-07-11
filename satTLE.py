@@ -4,7 +4,6 @@ from math import (pi, radians, degrees, sin, cos,
 import os
 import pickle
 import requests
-import time
 import sys
 
 
@@ -137,31 +136,10 @@ def interpretTLE(data):
     return TLE
 
 
-def pol2cart(r, geocentricRA, geocentricDec):
-    # Takes inputs in radians, returns in km
-    # Will give location of satellite in X Y Z geocentric
-
-    Xg = r * cos(geocentricRA)*cos(geocentricDec)
-    Yg = r * sin(geocentricRA)*cos(geocentricDec)
-    Zg = r * sin(geocentricDec)
-
-    return [Xg, Yg, Zg]
 
 
-def LLA2cart(obsvLLA):
-    obsvlat, obsvlong, height = obsvLLA
-    # Lat long need to be in degrees, altitude in m
-    # Converts lat/long into X Y Z coords in km
 
-    a = 6378.137
-    b = 6356.75231424518
-    ecc = sqrt((a**2 - b**2)/a**2)
-    N = a/sqrt(1 - ecc**2 * sin(obsvlat)**2)
-    X = (N + height) * cos(obsvlat) * cos(obsvlong)
-    Y = (N + height) * cos(obsvlat) * sin(obsvlong)
-    Z = (b**2/a**2 * N + height)*sin(obsvlat)
 
-    return [X, Y, Z]
 
 
 def cart2RADec(satPos, obsvPos):
@@ -186,30 +164,7 @@ def cart2RADec(satPos, obsvPos):
     return [alpha, delta, r]
 
 
-def LLA2AzEl(satLLACoords, obsvLLA, satPos, obsvPos):
 
-    obsvLat, obsvLong, height = obsvLLA
-    satLat, satLong = satLLACoords
-    satLat = radians(satLat)
-    satLong = radians(satLong)
-
-    dlong = satLong - obsvLong
-    arg1 = sin(dlong)*cos(satLat)
-    arg2 = cos(obsvLat)*sin(satLat) - sin(obsvLat)*cos(satLat)*cos(dlong)
-    azimuth = atan2(arg1, arg2)
-    azimuth = (azimuth + 2 * pi) % (2*pi)
-
-    xd, yd, zd = satPos
-    x, y, z = obsvPos
-
-    dx = xd - x
-    dy = yd - y
-    dz = zd - z
-
-    magnitude = sqrt((x**2+y**2+z**2)*(dx**2+dy**2+dz**2))
-    elevation = pi/2.0 - acos((x*dx + y*dy + z*dz) / magnitude)
-
-    return [azimuth, elevation]
 
 
 def ECEF2LLA(pos):
@@ -222,14 +177,14 @@ def ECEF2LLA(pos):
     latitude = atan2(p, Z)
     longitude = atan2(Y, X)
 
-    error = 1111
+    error = 111111
     # Earth radius at equator and poles, metres
     a = 6378137.0
     b = 6356752.31424518
     e = sqrt((a**2 - b**2)/(a**2))
     i = 0
 
-    while(error > 0.0000001):
+    while(error > 0.000000001):
         if(i > 50):
             latitude = atan(Z/sqrt(X**2 + Y**2))
 
@@ -256,14 +211,7 @@ def ECEF2LLA(pos):
             'longitude' : degrees(longitude)}
 
 
-def getAzEl(TLE, satName, obsvLLA):
 
-    sat = TLE[satName]
-    # FIXASA obsvCoords = LLA2cart(obsvLLA)
-    satLLA, cartCoords, obsvCoords = TLE2coords(sat, obsvLLA)
-    azimuth, elevation = LLA2AzEl(satLLA, obsvLLA, cartCoords, obsvCoords)
-
-    return [degrees(azimuth), degrees(elevation)]
 
 
 class Observer(object):
@@ -291,6 +239,10 @@ class Satellite(object):
         self.orbitNumber = satelliteTLE['ORBITNUM']
         self.SemiMajorAxis = self.calcSemiMajorAxis()
         self.perigee = self.calcPerigee()
+
+        year = datetime.strptime(self.epoch[0:2], '%y')
+        d = timedelta(days=float(self.epoch[2:]) - 1)  # Uses a 0 base
+        self.epoch_time = year + d
 
     def runCalcs(self, manual_time=0):
         self.time = self.epoch_difference() + manual_time/86400.0
@@ -330,7 +282,7 @@ class Satellite(object):
         # Our error term
         E_error = 100000000
         i = 0
-        while(E_error > 0.000000001):
+        while(E_error > 0.00001):
             if i > 50:
                 # If we aren't converging go for a best guess
                 Edash = e**2 * sin(M)*cos(M)
@@ -403,6 +355,16 @@ class Satellite(object):
 
         return [radians(pRAAN), radians(pAP)]
 
+    def pol2cart(self):
+        # Takes inputs in radians, returns in km
+        # Will give location of satellite in X Y Z geocentric
+
+        Xg = self.geocentricDistance * cos(self.geocentricRA)*cos(self.geocentricDec)
+        Yg = self.geocentricDistance * sin(self.geocentricRA)*cos(self.geocentricDec)
+        Zg = self.geocentricDistance * sin(self.geocentricDec)
+
+        return [Xg, Yg, Zg]
+
     def calcRADiff(self):
         # ArgLat should be in radians, Returns in radians
         i = radians(self.inclination)
@@ -432,11 +394,8 @@ class Satellite(object):
         # Calculate difference between current time and the
         # time the TLE was set (epoch) in solar days, epoch is a string
 
-        year = datetime.strptime(self.epoch[0:2], '%y')
-        d = timedelta(days=float(self.epoch[2:]) - 1)  # Uses a 0 base
-        epoch_time = year + d
         current_time = datetime.utcnow()
-        time_difference = current_time - epoch_time
+        time_difference = current_time - self.epoch_time
 
         return time_difference.total_seconds()/86400  # In fractional days
 
@@ -444,8 +403,65 @@ class Satellite(object):
         # Takes a TLE and calculates XYZ, LLA of satellite
         self.runCalcs(manualTime)  # Ensure everything is up to date
 
-        cartesianCoords = pol2cart(self.geocentricDistance,
-                                   self.geocentricRA, self.geocentricDec)
+        cartesianCoords = self.pol2cart()
         LLACoords = ECEF2LLA(cartesianCoords)
 
         return [LLACoords, cartesianCoords]
+
+
+class Observer():
+    def __init__(self, latitude, longitude, height):
+        self.latitude = radians(latitude)  # Degrees
+        self.longitude = radians(longitude)  # Degrees
+        self.height = height  # In metres
+
+        self.position = self.LLA2cart()
+
+    def LLA2cart(self):
+        # Converts lat/long into X Y Z coords in km
+
+        a = 6378.137
+        b = 6356.75231424518
+        ecc = sqrt((a**2 - b**2)/a**2)
+        N = a/sqrt(1 - ecc**2 * sin(self.latitude)**2)
+        X = (N + self.height) * cos(self.latitude) * cos(self.longitude)
+        Y = (N + self.height) * cos(self.latitude) * sin(self.longitude)
+        Z = (b**2/a**2 * N + self.height)*sin(self.latitude)
+
+        return {'x': X, 'y': Y, 'z': Z}
+
+    def LLA2AzEl(self, satLLACoords, satPos):
+
+        # FIX do we need to convert obsv to radians also?
+        #satLat, satLong = satLLACoords
+        satLat = satLLACoords['latitude']
+        satLong = satLLACoords['longitude']
+        satLat = radians(satLat)
+        satLong = radians(satLong)
+
+        dlong = satLong - self.longitude
+        arg1 = sin(dlong)*cos(satLat)
+        arg2 = cos(self.latitude)*sin(satLat) - sin(self.latitude)*cos(satLat)*cos(dlong)
+        azimuth = atan2(arg1, arg2)
+        azimuth = (azimuth + 2 * pi) % (2*pi)
+
+        xd, yd, zd = satPos
+
+        x = self.position['x']
+        y = self.position['y']
+        z = self.position['z']
+
+        dx = xd - x
+        dy = yd - y
+        dz = zd - z
+
+        magnitude = sqrt((x**2+y**2+z**2)*(dx**2+dy**2+dz**2))
+        elevation = pi/2.0 - acos((x*dx + y*dy + z*dz) / magnitude)
+
+        return [azimuth, elevation]
+
+    def getAzEl(self, satLLA, satCoords):
+
+        azimuth, elevation = self.LLA2AzEl(satLLA, satCoords)
+
+        return [degrees(azimuth), degrees(elevation)]
