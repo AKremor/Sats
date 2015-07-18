@@ -6,6 +6,7 @@ __author__ = 'Anthony'
 import satTLE
 import json
 import time
+import stepperControl
 
 TLE = satTLE.loadTLE()
 ISS = satTLE.Satellite('ISS', TLE['ISS (ZARYA)'])
@@ -22,9 +23,15 @@ def continuous_output():
 
     shepp = satTLE.Observer(-37.97357, 145.01636, 120)
 
+    # Make the stepper
+    azimuth_stepper = stepperControl.Stepper(7, 8)  # FIX
+
     while True:
         satLLA, satCoords = ISS.LLAcoordinates(0)
-        print shepp.getAzEl(satLLA, satCoords)
+        azimuth, elevation = shepp.getAzEl(satLLA, satCoords)
+
+        # Now move the stepper
+        azimuth_stepper.rotate_to_angle(azimuth)
         time.sleep(5)
 
 
