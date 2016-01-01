@@ -1,40 +1,51 @@
 import threading
-import gps
+import sensors
 import satTLE
 import time
 import stepperControl
 from Queue import Queue
 
-TLE = satTLE.loadTLE()
-ISS = satTLE.Satellite('ISS', TLE['EAGLE 2'])
 
+def rotate_antenna():
+    serial_port = sensors.init_GPS('/dev/ttyAMA0', 38400)
+    i2c = sensors.init_compass(0, 0x1d)
+    q = Queue()
 
-def continuous_output():
+    t_gps = threading.Thread(target=sensors.read_GPS, args=(serial_port, q,))
+    t_gps.start()
+
+    sat_name = raw_input("Please enter the exact satellite name: ")
     # Testing
     # make a new satellite
     TLE = satTLE.loadTLE()
-    ISS = satTLE.Satellite('ISS', TLE['ISS (ZARYA)'])
-
+    ISS = satTLE.Satellite('ISS', TLE[sat_name])
     shepp = satTLE.Observer(-37.97357, 145.01636, 120)
 
     # Make the stepper
-    azimuth_stepper = stepperControl.Stepper(11, 12)
-    elevation_stepper = stepperControl.Stepper(7, 8)
+    azimuth_stepper = stepperControl.Stepper(11, 12, 0.001, 27 * 200/360.0)
+    elevation_stepper = stepperControl.Stepper(15, 16, 0.001, 27 * 200/360.0)
+
     while True:
+
         satLLA, satCoords = ISS.LLAcoordinates(0)
         azimuth, elevation = shepp.getAzEl(satLLA, satCoords)
 
-        # Now move the steppers
-        azimuth_stepper.rotate_to_angle(azimuth)
-	elevation_stepper.rotate_to_angle(elevation)
-        time.sleep(5)
+        real_azimuth = sensors.read_compass(i2c)
+        # Register that we want to move
+        azimuth_stepper.rotate_to_angle(azimuth, real_azimuth)
+        elevation_stepper.rotate_to_angle(elevation)
+
+        # Now step both motors
+        if azimuth_stepper.has_steps():
+            while azimuth_stepper.step():
+                pass
+
+        if elevation_stepper.has_steps():
+            while elevation_stepper.step():
+                pass
+
+        time.sleep(1)
 
 
-#continuous_output()
-
-serial_port = gps.init_GPS('/dev/ttyAMA0', 38400)
-q = Queue()
-
-thread = threading.Thread(target=gps.read_GPS, args=(serial_port,q,))
-thread.start()
-
+if __name__ == '__main__':
+    rotate_antenna()
