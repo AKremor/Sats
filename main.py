@@ -19,7 +19,7 @@ def rotate_antenna():
     # make a new satellite
     TLE = satTLE.loadTLE()
     ISS = satTLE.Satellite('ISS', TLE[sat_name])
-    shepp = satTLE.Observer(-37.97357, 145.01636, 120)
+    location = satTLE.Observer(-37.97357, 145.01636, 120)
 
     # Make the stepper
     azimuth_stepper = stepperControl.Stepper(11, 12, 0.001, 27 * 200/360.0)
@@ -28,7 +28,7 @@ def rotate_antenna():
     while True:
 
         satLLA, satCoords = ISS.LLAcoordinates(0)
-        azimuth, elevation = shepp.getAzEl(satLLA, satCoords)
+        azimuth, elevation = location.getAzEl(satLLA, satCoords)
 
         real_azimuth = sensors.read_compass(i2c)
         # Register that we want to move
